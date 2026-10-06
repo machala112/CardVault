@@ -1,0 +1,50 @@
+name: Build Admin APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    name: Build & Release Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Install dependencies
+        working-directory: admin-apk
+        run: npm install
+
+      - name: Eject Expo to get android folder
+        working-directory: admin-apk
+        run: CI=1 npx expo prebuild --platform android --non-interactive
+
+      - name: Write Supabase config
+        working-directory: admin-apk
+        run: |
+          echo "EXPO_PUBLIC_SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
+          echo "EXPO_PUBLIC_SUPABASE_SERVICE_KEY=${{ secrets.SUPABASE_SERVICE_KEY }}" >> .env
+
+      - name: Build APK with Gradle
+        working-directory: admin-apk/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CardValidator-APK
+          path: admin-apk/android/app/build/outputs/apk/release/*.apk

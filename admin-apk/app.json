@@ -1,0 +1,73 @@
+{
+  "expo": {
+    "name": "CardValidator Admin",
+    "slug": "cardvalidator-admin",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#05060f"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#05060f"
+      },
+      "package": "com.cardvalidator.admin",
+      "versionCode": 2,
+      "permissions": [
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING",
+        "android.permission.WAKE_LOCK",
+        "android.permission.INTERNET",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.READ_MEDIA_IMAGES"
+      ],
+      "foregroundService": {
+        "notificationTitle": "CardValidator Admin",
+        "notificationBody": "Monitoring card validations…",
+        "notificationColor": "#7c6dfa"
+      }
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#7c6dfa",
+          "sounds": [
+            "./assets/sounds/hardcore.mp3",
+            "./assets/sounds/alert.mp3",
+            "./assets/sounds/chime.mp3"
+          ]
+        }
+      ],
+      [
+        "expo-background-fetch"
+      ],
+      [
+        "expo-task-manager"
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow CardValidator Admin to save card images to your gallery.",
+          "savePhotosPermission": "Allow CardValidator Admin to save card images to your gallery.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ],
+    "extra": {
+      "eas": { "projectId": "9c173ebc-a98e-4043-ba99-9496864c087f" }
+    }
+  }
+}

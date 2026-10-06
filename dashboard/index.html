@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CardValidator — Verify Your Card</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- ░░░ BACKGROUND ░░░ -->
+  <div class="bg-layer">
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+    <div class="bg-orb orb-3"></div>
+    <canvas id="bg-canvas"></canvas>
+  </div>
+
+  <!-- ░░░ NAVBAR ░░░ -->
+  <nav class="navbar glass-panel">
+    <div class="nav-brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="5" width="20" height="14" rx="3"/>
+          <path d="M2 10h20"/>
+          <path d="M6 15h4"/>
+          <path d="M14 15h4"/>
+        </svg>
+      </div>
+      <span class="brand-name">CardValidator</span>
+    </div>
+    <div class="nav-status">
+      <span class="status-dot"></span>
+      <span class="status-text">Live System</span>
+    </div>
+  </nav>
+
+  <!-- ░░░ HERO ░░░ -->
+  <section class="hero">
+    <div class="hero-badge glass-chip">
+      <span class="chip-dot"></span>
+      Instant Card Verification
+    </div>
+    <h1 class="hero-title">
+      Validate Your<br/>
+      <span class="gradient-text">Gift Card</span>
+    </h1>
+    <p class="hero-sub">Upload your card image and enter the code below. We'll verify it instantly — no account required.</p>
+  </section>
+
+  <!-- ░░░ MAIN CARD ░░░ -->
+  <main class="main-container">
+    <div class="validator-card mirror-glass" id="validatorCard">
+
+      <!-- STEP 1: Upload -->
+      <div class="step" id="stepUpload">
+        <div class="step-header">
+          <div class="step-num">01</div>
+          <div>
+            <h2 class="step-title">Upload Card Image</h2>
+            <p class="step-desc">Take a clear photo of your gift card</p>
+          </div>
+        </div>
+
+        <!-- Image uploader drop zone -->
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="fileInput" accept="image/*" hidden />
+          <div class="upload-idle" id="uploadIdle">
+            <div class="upload-icon-wrap glass-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <p class="upload-label">Drag & drop or <button class="upload-browse" onclick="document.getElementById('fileInput').click()">browse</button></p>
+            <p class="upload-hint">PNG, JPG, WEBP — max 10 MB</p>
+          </div>
+          <div class="upload-preview hidden" id="uploadPreview">
+            <img id="previewImg" src="" alt="Card preview" />
+            <button class="remove-img glass-chip" id="removeImg">✕ Remove</button>
+          </div>
+        </div>
+
+        <!-- Code input -->
+        <div class="step-header" style="margin-top:28px">
+          <div class="step-num">02</div>
+          <div>
+            <h2 class="step-title">Enter Card Code</h2>
+            <p class="step-desc">Type or paste the code exactly as printed</p>
+          </div>
+        </div>
+
+        <div class="code-input-wrap">
+          <div class="code-prefix">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="5" y="11" width="14" height="10" rx="2"/>
+              <path d="M8 11V7a4 4 0 018 0v4"/>
+            </svg>
+          </div>
+          <input
+            type="text"
+            id="codeInput"
+            class="code-input"
+            placeholder="e.g. CARD-ALPHA-001"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+
+        <!-- Validate button -->
+        <button class="btn-validate liquid-glass" id="validateBtn" onclick="startValidation()">
+          <span class="btn-text">Validate Card</span>
+          <svg class="btn-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+
+        <p class="privacy-note">
+          <svg viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1l6 2.5v4C14 11.5 11.5 14.5 8 15 4.5 14.5 2 11.5 2 7.5v-4L8 1z"/>
+          </svg>
+          Your data is encrypted and stored securely. No account needed.
+        </p>
+      </div>
+
+      <!-- STEP 2: Loading -->
+      <div class="step hidden" id="stepLoading">
+        <div class="loading-center">
+          <!-- Spiral loader -->
+          <div class="spiral-loader-wrap">
+            <div class="spiral-loader">
+              <div class="spiral-ring ring-1"></div>
+              <div class="spiral-ring ring-2"></div>
+              <div class="spiral-ring ring-3"></div>
+              <div class="spiral-core"></div>
+            </div>
+          </div>
+          <h2 class="loading-title">Validating Your Card</h2>
+          <p class="loading-sub" id="loadingMsg">Connecting to verification server...</p>
+          <div class="loading-steps">
+            <div class="ls-item" id="ls1"><span class="ls-dot"></span> Uploading image</div>
+            <div class="ls-item" id="ls2"><span class="ls-dot"></span> Reading card code</div>
+            <div class="ls-item" id="ls3"><span class="ls-dot"></span> Verifying with database</div>
+            <div class="ls-item" id="ls4"><span class="ls-dot"></span> Finalizing result</div>
+          </div>
+          <p class="please-wait">Please wait while we validate your card…</p>
+        </div>
+      </div>
+
+      <!-- STEP 3: Result -->
+      <div class="step hidden" id="stepResult">
+        <div class="result-center" id="resultContent">
+          <!-- populated by JS -->
+        </div>
+        <button class="btn-validate liquid-glass" style="margin-top:32px" onclick="resetForm()">
+          <span class="btn-text">Validate Another Card</span>
+        </button>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ░░░ FOOTER ░░░ -->
+  <footer class="footer">
+    <p>© 2025 CardValidator · Secure · Instant · Reliable</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# Expo / React Native
+admin-apk/node_modules/
+admin-apk/.expo/
+admin-apk/.env
+admin-apk/android/
+admin-apk/ios/
+admin-apk/*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

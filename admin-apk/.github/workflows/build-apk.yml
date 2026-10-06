@@ -1,0 +1,90 @@
+name: Build Admin APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'admin-apk/**'
+  workflow_dispatch:          # allow manual trigger from GitHub UI
+
+jobs:
+  build-apk:
+    name: Build & Release Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-apk
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Node setup ────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache:        'npm'
+          cache-dependency-path: admin-apk/package-lock.json
+
+      # ── Install dependencies ───────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Inject secrets as env ──────────────────────────────
+      - name: Write Supabase config
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          sed -i "s|https://YOUR_PROJECT.supabase.co|${SUPABASE_URL}|g" src/services/supabase.js
+          sed -i "s|YOUR_SERVICE_ROLE_KEY|${SUPABASE_SERVICE_KEY}|g"    src/services/supabase.js
+
+      # ── EAS build ─────────────────────────────────────────
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token:       ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build APK with EAS
+        run: eas build --platform android --profile production --non-interactive --output ./build/cardvalidator-admin.apk
+
+      # ── Upload APK as artifact ─────────────────────────────
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name:           cardvalidator-admin-apk
+          path:           admin-apk/build/cardvalidator-admin.apk
+          retention-days: 30
+
+      # ── Notify admin on build success ─────────────────────
+      - name: Notify build complete (webhook)
+        if: success()
+        env:
+          WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
+        run: |
+          curl -s -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d '{"text":"✅ CardValidator Admin APK built successfully! Download from GitHub Actions artifacts."}'
+        continue-on-error: true
+
+      # ── Create GitHub Release ──────────────────────────────
+      - name: Create GitHub Release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name:  apk-${{ github.run_number }}
+          name:      "Admin APK Build #${{ github.run_number }}"
+          body:      |
+            🎉 CardValidator Admin APK — Build #${{ github.run_number }}
+            
+            **Commit:** ${{ github.sha }}
+            **Branch:** ${{ github.ref_name }}
+            **Built at:** ${{ github.event.head_commit.timestamp }}
+
+            Download the APK from the assets below and install on your Android device.
+          files:      admin-apk/build/cardvalidator-admin.apk
+          draft:      false
+          prerelease: false
