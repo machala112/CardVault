@@ -112,7 +112,7 @@ async function render() {
   }
 
   if (route.name === 'redeem') {
-    updateNav(getUser());
+    updateNav(null); // Public page: never show auth UI, always anonymous
     view.innerHTML = redeemResolvingTpl();
     let res;
     try {
