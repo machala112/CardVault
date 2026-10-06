@@ -23,7 +23,7 @@ jobs:
 
       - name: Check Cloudflare credentials are configured
         run: |
-          if [ -z "$CF_API_TOKEN" ] || [ -z "$CF_ACCOUNT_ID" ]; then
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "::error::Add CF_API_TOKEN and CF_ACCOUNT_ID as repository secrets (Settings → Secrets and variables → Actions), then re-run this workflow."
             exit 1
           fi
