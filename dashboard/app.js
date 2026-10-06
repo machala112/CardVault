@@ -51,9 +51,6 @@ function landingTpl() {
       <div class="landing-card">
         <div class="landing-logo">⚡</div>
         <h1>CardValidator</h1>
-        <p class="landing-sub">Validate gift cards and vouchers instantly.</p>
-        <p class="landing-hint">To validate a card, open the share link sent by the business.</p>
-        <p class="landing-hint small">Are you a business? Get the CardValidator admin app to create your own share link and manage your codes.</p>
       </div>
     </div>`;
 }
