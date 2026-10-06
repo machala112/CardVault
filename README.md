@@ -10,24 +10,30 @@ with **instant push notifications** on every validation.
 ```
 ┌──────────────┐      ┌─────────────────────────────────────────┐
 │  Dashboard   │─────▶│  Cloudflare Worker (workers/api)        │
-│  (static,    │      │  · Auth: signup / signin (PBKDF2, D1)   │
+│  (static,    │      │  · Auth: Firebase ID tokens (verified)  │
 │   served by  │      │  · Permanent share links (one per user) │
 │   the Worker)│      │  · Card validation (atomic in D1)       │
 └──────────────┘      │  · Image upload → R2                    │
                       │  · Admin API                            │
 ┌──────────────┐      │  · Firebase push on every validation    │
-│  Admin APK   │─────▶│                                         │
-│  (Expo)      │      └──────┬──────────────────┬───────────────┘
-└──────────────┘             │                  │
-                        ┌────▼────┐        ┌────▼────┐
-                        │ D1 (DB) │        │ R2 (img)│
-                        └─────────┘        └─────────┘
+│  Admin APK   │──┐   │                                         │
+│  (Expo)      │  │   └──────┬──────────────────┬───────────────┘
+└──────────────┘  │          │                  │
+┌──────────────┐  │     ┌────▼────┐        ┌────▼────┐
+│  Firebase    │──┘     │ D1 (DB) │        │ R2 (img)│
+│  Auth        │  sign-in/up, ID tokens
+└──────────────┘        └─────────┘        └─────────┘
 ```
 
-- **Cloudflare Workers** — the entire backend (`workers/api/src/`): auth,
-  links, validation, uploads, admin endpoints. Also serves the dashboard.
-- **Cloudflare D1** — database: `users`, `sessions`, `share_links`,
-  `card_codes`, `card_validations`, `push_tokens`.
+- **Firebase Authentication** — the only sign-in system. Clients sign up /
+  sign in with email + password through Firebase; the Worker verifies the
+  resulting ID token (Google's `accounts:lookup`) on every authenticated
+  call. No passwords are ever stored on Cloudflare.
+- **Cloudflare Workers** — the rest of the backend (`workers/api/src/`):
+  user records, permanent links, validation, uploads, admin endpoints.
+  Also serves the dashboard.
+- **Cloudflare D1** — database: `users` (keyed by Firebase UID),
+  `share_links`, `card_codes`, `card_validations`, `push_tokens`.
   Schema: `workers/api/migrations/0001_init.sql`.
 - **Cloudflare R2** — card image storage (bucket `cardvault-images`),
   served back via `/img/<key>`.
@@ -41,7 +47,7 @@ with **instant push notifications** on every validation.
 CardVault/
 ├── workers/api/            ← Cloudflare Worker backend
 │   ├── src/index.js        ← router + all endpoints
-│   ├── src/auth.js         ← PBKDF2 hashing, sessions, link tokens
+│   ├── src/auth.js         ← Firebase ID-token verification, link tokens
 │   ├── src/fcm.js          ← Firebase Cloud Messaging sender
 │   └── migrations/0001_init.sql  ← D1 schema
 ├── dashboard/              ← static SPA (signup/signin, my link, validation)
@@ -63,19 +69,27 @@ wrangler d1 create cardvault-db        # paste database_id into wrangler.toml
 wrangler r2 bucket create cardvault-images
 wrangler d1 execute cardvault-db --file workers/api/migrations/0001_init.sql --remote
 wrangler secret put FCM_SERVICE_ACCOUNT_JSON   # Firebase service-account JSON (see below)
-wrangler secret put ADMIN_EMAIL                # your email → becomes admin on signup
+wrangler secret put FIREBASE_WEB_API_KEY        # Firebase Web API Key (token verification + client config)
+wrangler secret put ADMIN_EMAIL                # your email → becomes admin on first sign-in
 wrangler deploy
 ```
 
-### 2. Firebase (push notifications)
+### 2. Firebase (auth + push)
 
 1. In the [Firebase console](https://console.firebase.google.com), create a
-   project (or reuse one) and add an **Android** app with your package name.
-2. Download `google-services.json` → store it as the repo secret
+   project (or reuse one). Go to **Build → Authentication → Get started**,
+   then **Sign-in method → Email/Password → Enable**.
+2. Add an **Android** app with your package name (`com.cardvalidator.admin`
+   by default).
+3. Download `google-services.json` → store it as the repo secret
    `GOOGLE_SERVICES_JSON` (Settings → Secrets → Actions). The APK workflow
    writes it at build time; it is never committed.
-3. Project Settings → Service accounts → **Generate new private key** →
+4. Project Settings → Service accounts → **Generate new private key** →
    paste the JSON into `wrangler secret put FCM_SERVICE_ACCOUNT_JSON`.
+5. Project Settings → General → **Web API Key** → `wrangler secret put
+   FIREBASE_WEB_API_KEY`. The Worker serves it to clients via the public
+   `GET /api/config` endpoint (it's public-by-design; restrict it by
+   domain/app in the Google Cloud console if you like).
 
 ### 3. GitHub secrets
 
@@ -83,6 +97,9 @@ wrangler deploy
 |---|---|---|
 | `CLOUDFLARE_API_TOKEN` | deploy-worker | Worker deploys |
 | `CLOUDFLARE_ACCOUNT_ID` | deploy-worker | Worker deploys |
+| `FCM_SERVICE_ACCOUNT_JSON` | deploy-worker | Firebase push secret |
+| `FIREBASE_WEB_API_KEY` | deploy-worker | Token verification + client config |
+| `ADMIN_EMAIL` | deploy-worker | Email that becomes admin on first sign-in |
 | `API_URL` | build-apk | Worker URL baked into the APK (`EXPO_PUBLIC_API_URL`) |
 | `GOOGLE_SERVICES_JSON` | build-apk | Firebase config for push |
 
@@ -104,14 +121,15 @@ wrangler deploy
 
 ## API reference
 
-All JSON. Authenticated calls send `Authorization: Bearer <token>`.
+All JSON. Sign in with Firebase first (email + password in the dashboard
+or admin app); authenticated calls send the Firebase ID token as
+`Authorization: Bearer <firebase-id-token>`.
 
 | Method & path | Auth | Description |
 |---|---|---|
-| `POST /api/auth/signup` | – | `{email, password, name}` → `{user, token, link}` |
-| `POST /api/auth/signin` | – | `{email, password}` → `{user, token}` |
-| `POST /api/auth/signout` | user | Invalidate session |
-| `GET /api/auth/me` | user | Current user |
+| `GET /api/config` | – | Firebase web config `{apiKey, authDomain, projectId}` |
+| `POST /api/auth/sync` | firebase | First call after sign-in → `{user, link}` |
+| `GET /api/auth/me` | firebase | Current user |
 | `GET /api/links/mine` | user | Your permanent share link |
 | `POST /api/links/regenerate` | user | New link, old one dies |
 | `GET /api/links/resolve?token=` | – | Check a share link |
@@ -140,10 +158,13 @@ cd admin-apk && EXPO_PUBLIC_API_URL=http://localhost:8787 npx expo start
 
 ## Security notes
 
-- Passwords: PBKDF2-SHA256, 100k iterations, per-user salt. Sessions are
-  opaque random tokens, 30-day expiry.
+- Auth is Firebase Authentication (email/password). The Worker never sees
+  or stores passwords — it verifies each ID token with Google and keys the
+  `users` row off the Firebase UID. The `ADMIN_EMAIL` address becomes admin
+  automatically on first sign-in.
 - No keys are committed anywhere. The Worker reads secrets via
-  `wrangler secret`; the dashboard needs none; the APK gets its config
+  `wrangler secret`; the dashboard and APK fetch the public Firebase web
+  config from `GET /api/config` at runtime; the APK gets its push config
   from build-time secrets.
 - The share link **is** the credential for the public validation page —
   treat it like a password and regenerate it if shared too widely.

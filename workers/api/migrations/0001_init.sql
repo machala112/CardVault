@@ -1,25 +1,19 @@
 -- ============================================================
 -- CardVault — D1 schema (Cloudflare)
+-- Auth is handled by Firebase Authentication: the users table keys
+-- off the Firebase UID. No passwords are stored here.
 -- Apply: wrangler d1 execute cardvault-db --file workers/api/migrations/0001_init.sql --remote
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS users (
-  id            TEXT PRIMARY KEY,
-  email         TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  password_salt TEXT NOT NULL,
-  name          TEXT,
-  is_admin      INTEGER NOT NULL DEFAULT 0,
-  created_at    TEXT NOT NULL
+  id           TEXT PRIMARY KEY,
+  firebase_uid TEXT UNIQUE NOT NULL,
+  email        TEXT NOT NULL,
+  name         TEXT,
+  is_admin     INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS sessions (
-  token      TEXT PRIMARY KEY,
-  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  expires_at TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 -- One permanent share link per user (user_id UNIQUE enforces it)
 CREATE TABLE IF NOT EXISTS share_links (

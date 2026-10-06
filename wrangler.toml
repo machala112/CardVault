@@ -7,8 +7,9 @@
 #   wrangler d1 create cardvault-db        # paste the database_id below
 #   wrangler r2 bucket create cardvault-images
 #   wrangler d1 execute cardvault-db --file workers/api/migrations/0001_init.sql --remote
-#   wrangler secret put FCM_SERVICE_ACCOUNT_JSON   # paste the Firebase service-account JSON
-#   wrangler secret put ADMIN_EMAIL                # the email that becomes admin on signup
+#   wrangler secret put FCM_SERVICE_ACCOUNT_JSON   # Firebase service-account JSON (server push)
+#   wrangler secret put FIREBASE_WEB_API_KEY        # Firebase Web API Key (token verification + client config)
+#   wrangler secret put ADMIN_EMAIL                # the email that becomes admin on first sync
 #
 # Deploy: wrangler deploy   (or push to main — .github/workflows/deploy-worker.yml)
 

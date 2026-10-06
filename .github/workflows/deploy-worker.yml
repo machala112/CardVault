@@ -74,14 +74,21 @@ jobs:
           else
             echo "::warning::FCM_SERVICE_ACCOUNT_JSON repo secret is not set — push notifications stay disabled until it is added."
           fi
+          if [ -n "$FIREBASE_WEB_API_KEY" ]; then
+            printf '%s' "$FIREBASE_WEB_API_KEY" | wrangler secret put FIREBASE_WEB_API_KEY
+            echo "FIREBASE_WEB_API_KEY set"
+          else
+            echo "::warning::FIREBASE_WEB_API_KEY repo secret is not set — sign-in will not work until it is added."
+          fi
           if [ -n "$ADMIN_EMAIL" ]; then
             printf '%s' "$ADMIN_EMAIL" | wrangler secret put ADMIN_EMAIL
             echo "ADMIN_EMAIL set"
           else
-            echo "::warning::ADMIN_EMAIL repo secret is not set — nobody becomes admin on signup until it is added."
+            echo "::warning::ADMIN_EMAIL repo secret is not set — nobody becomes admin on sync until it is added."
           fi
         env:
           FCM_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
+          FIREBASE_WEB_API_KEY: ${{ secrets.FIREBASE_WEB_API_KEY }}
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
 
       - name: Deploy worker

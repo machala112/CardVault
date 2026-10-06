@@ -1,12 +1,13 @@
 // CardVault API — Cloudflare Worker.
-// Auth + permanent share links + card validation + R2 image storage
-// + admin endpoints + Firebase push on every validation.
-// Static dashboard is served from the [assets] directory (env.ASSETS).
+// Auth is handled by Firebase Authentication: clients sign in with Firebase
+// and send the Firebase ID token as `Authorization: Bearer <token>`.
+// The Worker verifies the token (see auth.js), keeps the user record +
+// permanent share link in D1, stores card images in R2, and sends Firebase
+// push on every validation. Static dashboard served from [assets].
 
 import {
-  newId, newSalt, newToken, newLinkToken,
-  hashPassword, isValidEmail, nowIso,
-  getSessionUser, ensureShareLink,
+  newId, newLinkToken, nowIso,
+  verifyIdToken, getAuthUser, ensureShareLink,
 } from './auth.js';
 import { sendValidationPush } from './fcm.js';
 
@@ -32,7 +33,7 @@ async function readBody(request) {
 }
 
 async function requireUser(request, env) {
-  const user = await getSessionUser(request, env);
+  const user = await getAuthUser(request, env);
   if (!user) throw err('Not signed in', 401);
   return user;
 }
@@ -43,66 +44,53 @@ async function requireAdmin(request, env) {
   return user;
 }
 
-// ── auth ───────────────────────────────────────────────────────
+// ── public config + auth sync ──────────────────────────────────
 
-async function handleSignup(request, env) {
-  const { email = '', password = '', name = '' } = await readBody(request);
-  const cleanEmail = email.trim().toLowerCase();
-  if (!isValidEmail(cleanEmail)) return err('Enter a valid email address');
-  if (typeof password !== 'string' || password.length < 8)
-    return err('Password must be at least 8 characters');
-
-  const exists = await env.DB.prepare(
-    'SELECT id FROM users WHERE email = ?').bind(cleanEmail).first();
-  if (exists) return err('An account with this email already exists', 409);
-
-  const salt = newSalt();
-  const id = newId();
-  const adminEmail = (env.ADMIN_EMAIL || '').trim().toLowerCase();
-  const isAdmin = adminEmail && cleanEmail === adminEmail ? 1 : 0;
-  await env.DB.prepare(
-    `INSERT INTO users (id, email, password_hash, password_salt, name, is_admin, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).bind(id, cleanEmail, await hashPassword(password, salt), salt,
-         name.trim().slice(0, 80) || null, isAdmin, nowIso()).run();
-
-  const token = newToken();
-  await env.DB.prepare(
-    `INSERT INTO sessions (token, user_id, expires_at, created_at)
-     VALUES (?, ?, ?, ?)`
-  ).bind(token, id,
-         new Date(Date.now() + 30 * 864e5).toISOString(), nowIso()).run();
-
-  const user = { id, email: cleanEmail, name: name.trim() || null, is_admin: !!isAdmin };
-  const link = await ensureShareLink(env, originOf(request), id);
-  return json({ user, token, link });
+// Firebase web config for client SDKs. The apiKey is public-by-design
+// (it ships inside every Firebase client app); restrict it by domain/app
+// in the Google Cloud console if desired.
+async function handleConfig(request, env) {
+  if (!env.FIREBASE_WEB_API_KEY) return err('Server misconfigured', 500);
+  return json({
+    apiKey: env.FIREBASE_WEB_API_KEY,
+    authDomain: 'cardvault-ec7f8.firebaseapp.com',
+    projectId: 'cardvault-ec7f8',
+  });
 }
 
-async function handleSignin(request, env) {
-  const { email = '', password = '' } = await readBody(request);
-  const cleanEmail = email.trim().toLowerCase();
-  const row = await env.DB.prepare(
-    'SELECT * FROM users WHERE email = ?').bind(cleanEmail).first();
-  if (!row) return err('Email or password is incorrect', 401);
-  const hash = await hashPassword(password, row.password_salt);
-  if (hash !== row.password_hash) return err('Email or password is incorrect', 401);
-
-  const token = newToken();
-  await env.DB.prepare(
-    `INSERT INTO sessions (token, user_id, expires_at, created_at)
-     VALUES (?, ?, ?, ?)`
-  ).bind(token, row.id,
-         new Date(Date.now() + 30 * 864e5).toISOString(), nowIso()).run();
-
-  const user = { id: row.id, email: row.email, name: row.name, is_admin: !!row.is_admin };
-  return json({ user, token });
-}
-
-async function handleSignout(request, env) {
+// Called once after Firebase sign-in (and on app start with an existing
+// Firebase session): verifies the ID token, upserts the user row, makes
+// sure the permanent share link exists, returns both.
+async function handleAuthSync(request, env) {
   const auth = request.headers.get('Authorization') || '';
   const m = auth.match(/^Bearer\s+(.+)$/i);
-  if (m) await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(m[1].trim()).run();
-  return json({ ok: true });
+  if (!m) return err('Missing ID token', 401);
+  let verified;
+  try {
+    verified = await verifyIdToken(env, m[1].trim());
+  } catch (e) {
+    console.error('token verification error:', e.message);
+    return err('Authentication failed', 401);
+  }
+  if (!verified) return err('Invalid or expired sign-in', 401);
+
+  const adminEmail = (env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const isAdmin = adminEmail && verified.email === adminEmail ? 1 : 0;
+  const id = newId();
+  await env.DB.prepare(
+    `INSERT INTO users (id, firebase_uid, email, name, is_admin, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(firebase_uid) DO UPDATE SET
+       email = excluded.email,
+       name = COALESCE(excluded.name, users.name),
+       is_admin = excluded.is_admin`
+  ).bind(id, verified.uid, verified.email, verified.name, isAdmin, nowIso()).run();
+
+  const user = await env.DB.prepare(
+    'SELECT id, email, name, is_admin, created_at FROM users WHERE firebase_uid = ?'
+  ).bind(verified.uid).first();
+  const link = await ensureShareLink(env, originOf(request), user.id);
+  return json({ user: { ...user, is_admin: !!user.is_admin }, link });
 }
 
 // ── share links ────────────────────────────────────────────────
@@ -294,13 +282,13 @@ async function handleAdminPushToken(request, env) {
 
 async function handleApi(request, env, ctx) {
   if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
-  const url = new URL(request.url);
-  const path = url.pathname;
 
   try {
-    if (path === '/api/auth/signup' && request.method === 'POST') return await handleSignup(request, env);
-    if (path === '/api/auth/signin' && request.method === 'POST') return await handleSignin(request, env);
-    if (path === '/api/auth/signout' && request.method === 'POST') return await handleSignout(request, env);
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    if (path === '/api/config' && request.method === 'GET') return await handleConfig(request, env);
+    if (path === '/api/auth/sync' && request.method === 'POST') return await handleAuthSync(request, env);
     if (path === '/api/auth/me' && request.method === 'GET') {
       const user = await requireUser(request, env);
       return json({ user });

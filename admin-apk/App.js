@@ -1,5 +1,5 @@
 // App.js — CardValidator Admin Entry
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -7,6 +7,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Text, View, StyleSheet, ActivityIndicator } from 'react-native';
+import { onAuthStateChanged } from 'firebase/auth';
 
 import DashboardScreen        from './src/screens/DashboardScreen';
 import AllValidationsScreen   from './src/screens/AllValidationsScreen';
@@ -14,7 +15,8 @@ import SettingsScreen         from './src/screens/SettingsScreen';
 import ValidationDetailScreen from './src/screens/ValidationDetailScreen';
 import AuthScreen             from './src/screens/AuthScreen';
 
-import { me, getToken, clearToken } from './src/services/api';
+import { ready, auth } from './src/services/firebase';
+import { syncUser } from './src/services/api';
 import {
   setupNotificationChannel,
   requestPermissions,
@@ -88,6 +90,9 @@ function MainTabs({ onSignOut }) {
 
 export default function App() {
   const [authState, setAuthState] = useState('loading'); // 'loading' | 'authed' | 'guest'
+  // UID the push setup has already run for — avoids double registration when
+  // both the AuthScreen onAuth callback and the Firebase listener fire.
+  const pushedUidRef = useRef(null);
 
   // Set up push channels, permissions, FCM token registration
   const initPush = useCallback(async () => {
@@ -98,36 +103,62 @@ export default function App() {
     }
   }, []);
 
+  const initPushFor = useCallback(async (uid) => {
+    if (pushedUidRef.current === uid) return;
+    pushedUidRef.current = uid;
+    await initPush();
+  }, [initPush]);
+
   // Foreground push listener — registered once for the app lifetime
   useEffect(() => {
     const sub = addPushListener();
     return () => sub.remove();
   }, []);
 
-  // Restore session on launch
+  // Firebase session restore on launch: once init is ready, the auth-state
+  // listener fires immediately with the persisted user (or null).
   useEffect(() => {
+    let unsub = null;
+    let cancelled = false;
     (async () => {
       try {
-        const token = await getToken();
-        if (token) {
-          await me(); // throws if the token is invalid/expired
-          setAuthState('authed');
-          await initPush();
-          return;
-        }
-      } catch {
-        await clearToken();
+        await ready;
+        if (cancelled) return;
+        unsub = onAuthStateChanged(auth, async (fbUser) => {
+          if (cancelled) return;
+          if (fbUser) {
+            try {
+              const { user } = await syncUser(); // POST /api/auth/sync
+              if (cancelled) return;
+              setAuthState('authed');
+              await initPushFor(user && user.id ? user.id : fbUser.uid);
+            } catch (e) {
+              console.warn('[Auth] Backend sync failed:', e.message);
+              if (!cancelled) setAuthState('guest');
+            }
+          } else {
+            pushedUidRef.current = null;
+            setAuthState('guest');
+          }
+        });
+      } catch (e) {
+        console.warn('[Auth] Firebase init failed:', e.message);
+        if (!cancelled) setAuthState('guest');
       }
-      setAuthState('guest');
     })();
-  }, [initPush]);
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  }, [initPushFor]);
 
-  const handleAuth = useCallback(async () => {
+  const handleAuth = useCallback(async (user) => {
     setAuthState('authed');
-    await initPush();
-  }, [initPush]);
+    await initPushFor(user && user.id ? user.id : null);
+  }, [initPushFor]);
 
   const handleSignOut = useCallback(() => {
+    pushedUidRef.current = null;
     setAuthState('guest');
   }, []);
 

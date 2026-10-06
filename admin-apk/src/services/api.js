@@ -1,26 +1,46 @@
 // src/services/api.js — Cloudflare Worker REST API client
 //
 // Base URL comes from EXPO_PUBLIC_API_URL (no trailing slash).
-// Auth: Bearer token, persisted in AsyncStorage under 'cv_token'.
+// Auth: Firebase ID token as Bearer. The Firebase SDK persists the session
+// itself (see ./firebase.js) — there is no custom token storage here.
 // Errors: the API returns { error: "message" } with a non-2xx status.
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { auth, ready } from './firebase';
 
-const BASE_URL  = (process.env.EXPO_PUBLIC_API_URL || '').replace(/\/+$/, '');
-const TOKEN_KEY = 'cv_token';
+const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || '').replace(/\/+$/, '');
 
-async function request(path, { method = 'GET', body } = {}) {
-  if (!BASE_URL) {
-    throw new Error('API URL not configured — set EXPO_PUBLIC_API_URL');
-  }
-  const token = await AsyncStorage.getItem(TOKEN_KEY);
-  const res = await fetch(`${BASE_URL}${path}`, {
+/** Firebase ID token for the signed-in user, or null when signed out. */
+async function token(forceRefresh = false) {
+  await ready;
+  const user = auth.currentUser;
+  if (!user) return null;
+  return user.getIdToken(forceRefresh);
+}
+
+async function doFetch(path, tokenValue, { method = 'GET', body } = {}) {
+  return fetch(`${BASE_URL}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(tokenValue ? { Authorization: `Bearer ${tokenValue}` } : {}),
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
+}
+
+async function request(path, opts = {}) {
+  if (!BASE_URL) {
+    throw new Error('API URL not configured — set EXPO_PUBLIC_API_URL');
+  }
+  let idToken = await token();
+  let res = await doFetch(path, idToken, opts);
+
+  // Token may have expired between calls: force-refresh once and retry.
+  if (res.status === 401 && idToken) {
+    idToken = await token(true);
+    res = await doFetch(path, idToken, opts);
+  }
+
   let data = null;
   try {
     data = await res.json();
@@ -33,29 +53,24 @@ async function request(path, { method = 'GET', body } = {}) {
   return data;
 }
 
-// ── Token helpers ───────────────────────────────────────────────
-export const getToken   = () => AsyncStorage.getItem(TOKEN_KEY);
-export const setToken   = (t) => AsyncStorage.setItem(TOKEN_KEY, t);
-export const clearToken = () => AsyncStorage.removeItem(TOKEN_KEY);
-
-// ── Auth ────────────────────────────────────────────────────────
+// ── Auth (Firebase) ─────────────────────────────────────────────
+// signin: Firebase email/password → POST /api/auth/sync (Bearer ID token)
+//         → { user, link }. The SDK persists the session itself.
 export async function signin(email, password) {
-  const data = await request('/api/auth/signin', {
-    method: 'POST',
-    body:   { email, password },
-  });
-  if (data && data.token) {
-    await setToken(data.token);
-  }
-  return data; // { user, token }
+  await ready;
+  await signInWithEmailAndPassword(auth, email.trim(), password);
+  return syncUser();
+}
+
+// syncUser: register/refresh this Firebase user with the backend.
+// Called once after sign-in and on app start when a session exists.
+export async function syncUser() {
+  return request('/api/auth/sync', { method: 'POST' }); // → { user, link }
 }
 
 export async function signout() {
-  try {
-    await request('/api/auth/signout', { method: 'POST' });
-  } finally {
-    await clearToken();
-  }
+  await ready;
+  await signOut(auth);
 }
 
 export const me = () => request('/api/auth/me'); // → { user }

@@ -9,23 +9,20 @@ const sleep   = ms => new Promise(r => setTimeout(r, ms));
 const escHtml = s => String(s == null ? '' : s)
   .replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-// ── Session (localStorage) ───────────────────────────────────────
-const TOKEN_KEY = 'cv_token';
+// ── Session (Firebase Auth; user profile cached in localStorage for display) ─
 const USER_KEY  = 'cv_user';
-const getToken  = () => localStorage.getItem(TOKEN_KEY);
-const setToken  = t => localStorage.setItem(TOKEN_KEY, t);
-const clearToken= () => localStorage.removeItem(TOKEN_KEY);
 const getUser   = () => { try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch(e){ return null; } };
 const setUser   = u => localStorage.setItem(USER_KEY, JSON.stringify(u));
 const clearUser = () => localStorage.removeItem(USER_KEY);
+const fbAuth    = () => firebase.auth();
 
 // ── API client (same origin, JSON, Bearer auth) ───────────────────
 async function api(path, { method = 'GET', body = null, form = null, auth = false } = {}) {
   const headers = {};
   if (auth) {
-    const t = getToken();
-    if (!t) throw new Error('You are signed out. Please sign in again.');
-    headers['Authorization'] = 'Bearer ' + t;
+    const fbUser = fbAuth().currentUser;
+    if (!fbUser) throw new Error('You are signed out. Please sign in again.');
+    headers['Authorization'] = 'Bearer ' + await fbUser.getIdToken(); // auto-refreshes when expired
   }
   let payload = null;
   if (form) {
@@ -68,15 +65,10 @@ async function render() {
   const view = $('view');
 
   if (route.name === 'landing') {
-    // Already have a token? Verify it and bounce straight to the app.
-    if (getToken()) {
-      try {
-        const me = await api('/api/auth/me', { auth: true });
-        if (seq !== renderSeq) return;
-        setUser(me.user); updateNav(me.user);
-        location.hash = '#/app';
-        return;
-      } catch (e) { clearToken(); clearUser(); }
+    // Already signed in via Firebase? Bounce straight to the app.
+    if (fbAuth().currentUser) {
+      location.hash = '#/app';
+      return;
     }
     if (seq !== renderSeq) return;
     updateNav(null);
@@ -86,11 +78,16 @@ async function render() {
   }
 
   if (route.name === 'app') {
+    if (!fbAuth().currentUser) {
+      clearUser(); updateNav(null);
+      location.hash = '#/';
+      return;
+    }
     let me;
     try {
       me = await api('/api/auth/me', { auth: true });
     } catch (e) {
-      clearToken(); clearUser(); updateNav(null);
+      clearUser(); updateNav(null);
       location.hash = '#/';
       return;
     }
@@ -153,8 +150,8 @@ function updateNav(user) {
 }
 
 async function doSignout() {
-  try { await api('/api/auth/signout', { method: 'POST', auth: true }); } catch (e) { /* best effort */ }
-  clearToken(); clearUser(); updateNav(null);
+  try { await fbAuth().signOut(); } catch (e) { /* best effort */ }
+  clearUser(); updateNav(null);
   location.hash = '#/';
 }
 
@@ -401,12 +398,9 @@ function bindLanding() {
     const password = $('siPass').value;
     if (!email || !password) { showAuthError('Please enter your email and password.'); return; }
     try {
-      const { user, token } = await api('/api/auth/signin', {
-        method: 'POST', body: { email, password }
-      });
-      setToken(token); setUser(user);
-      location.hash = '#/app';
-    } catch (err) { showAuthError(err.message); }
+      await fbAuth().signInWithEmailAndPassword(email, password);
+      // onAuthStateChanged takes it from here (sync + route to #/app)
+    } catch (err) { showAuthError(err.message || 'Sign in failed.'); }
   });
 
   formUp.addEventListener('submit', async e => {
@@ -418,12 +412,10 @@ function bindLanding() {
     if (!email) { showAuthError('Please enter your email address.'); return; }
     if (password.length < 8) { showAuthError('Password must be at least 8 characters.'); return; }
     try {
-      const { user, token } = await api('/api/auth/signup', {
-        method: 'POST', body: { name, email, password }
-      });
-      setToken(token); setUser(user);
-      location.hash = '#/app';
-    } catch (err) { showAuthError(err.message); }
+      const cred = await fbAuth().createUserWithEmailAndPassword(email, password);
+      await cred.user.updateProfile({ displayName: name });
+      // onAuthStateChanged takes it from here (sync + route to #/app)
+    } catch (err) { showAuthError(err.message || 'Sign up failed.'); }
   });
 }
 
@@ -694,5 +686,73 @@ function showResult(status, code, errMsg) {
   document.head.appendChild(style);
 })();
 
-// ── Boot ─────────────────────────────────────────────────────────
-render();
+// ── Firebase boot + auth state routing ──────────────────────────
+function go(hash) {
+  if (location.hash === hash) render();
+  else location.hash = hash; // fires hashchange → render
+}
+
+async function syncWithServer(fbUser) {
+  const idToken = await fbUser.getIdToken();
+  const res = await fetch('/api/auth/sync', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + idToken },
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* non-JSON */ }
+  if (!res.ok) throw new Error((data && data.error) || 'Account sync failed');
+  return data; // { user, link }
+}
+
+async function boot() {
+  // 1. Load public Firebase web config from the Worker (no keys hardcoded).
+  let cfg;
+  try {
+    cfg = await api('/api/config');
+  } catch (e) {
+    $('view').innerHTML =
+      '<div class="main-container"><div class="validator-card mirror-glass">' +
+      '<div class="result-center"><div class="result-icon invalid">⚡</div>' +
+      '<h2 class="result-title invalid">Could not load</h2>' +
+      '<p class="result-msg">Failed to load app configuration: ' + escHtml(e.message) + '</p>' +
+      '</div></div></div>';
+    return;
+  }
+  if (!cfg || !cfg.apiKey || !cfg.authDomain || !cfg.projectId) {
+    console.error('Invalid /api/config response', cfg);
+    $('view').innerHTML =
+      '<div class="main-container"><div class="validator-card mirror-glass">' +
+      '<div class="result-center"><div class="result-icon invalid">⚡</div>' +
+      '<h2 class="result-title invalid">Misconfigured</h2>' +
+      '<p class="result-msg">The server did not return a valid Firebase configuration.</p>' +
+      '</div></div></div>';
+    return;
+  }
+
+  // 2. Init Firebase Auth.
+  firebase.initializeApp(cfg);
+
+  // 3. One handler owns post-sign-in sync + routing; it also fires on page
+  //    load when a Firebase session already exists.
+  fbAuth().onAuthStateChanged(async fbUser => {
+    if (fbUser) {
+      try {
+        const { user } = await syncWithServer(fbUser);
+        setUser(user); updateNav(user);
+      } catch (e) {
+        console.error('Auth sync failed:', e);
+        // Still route; the app route will surface the error via /api/auth/me.
+      }
+      // Public share links work without touching auth state.
+      if (currentRoute().name !== 'redeem') go('#/app');
+      else render();
+    } else {
+      clearUser(); updateNav(null);
+      const name = currentRoute().name;
+      if (name === 'app') go('#/');
+      else render();
+    }
+  });
+}
+
+boot();
