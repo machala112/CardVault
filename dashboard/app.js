@@ -1,167 +1,582 @@
 /* ============================================================
-   CardValidator — Frontend Logic
-   Supabase · Image Upload · Spiral Loader · Validation
+   CardValidator — Dashboard SPA (vanilla JS, no build step)
+   Hash router · Worker API backend · FCM-ready
    ============================================================ */
 
-// ── CONFIG — paste your own Supabase project values here (see README) ───
-const SUPABASE_URL    = 'https://YOUR_PROJECT.supabase.co';
-const SUPABASE_ANON   = 'YOUR_ANON_PUBLIC_KEY';
-const BUCKET_NAME     = 'card-images';
+// ── Utils ──────────────────────────────────────────────────────
+const $       = id => document.getElementById(id);
+const sleep   = ms => new Promise(r => setTimeout(r, ms));
+const escHtml = s => String(s == null ? '' : s)
+  .replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-// ── Supabase minimal client ────────────────────────────────────
-const supa = {
-  async upload(file) {
-    const ext  = file.name.split('.').pop();
-    const path = `uploads/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const res  = await fetch(
-      `${SUPABASE_URL}/storage/v1/object/${BUCKET_NAME}/${path}`,
-      {
-        method: 'POST',
-        headers: {
-          'apikey':        SUPABASE_ANON,
-          'Authorization': `Bearer ${SUPABASE_ANON}`,
-          'Content-Type':  file.type,
-          'x-upsert':      'true',
-        },
-        body: file,
-      }
-    );
-    if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`);
-    return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET_NAME}/${path}`;
-  },
+// ── Session (localStorage) ───────────────────────────────────────
+const TOKEN_KEY = 'cv_token';
+const USER_KEY  = 'cv_user';
+const getToken  = () => localStorage.getItem(TOKEN_KEY);
+const setToken  = t => localStorage.setItem(TOKEN_KEY, t);
+const clearToken= () => localStorage.removeItem(TOKEN_KEY);
+const getUser   = () => { try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch(e){ return null; } };
+const setUser   = u => localStorage.setItem(USER_KEY, JSON.stringify(u));
+const clearUser = () => localStorage.removeItem(USER_KEY);
 
-  async rpc(fn, params) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
-      method: 'POST',
-      headers: {
-        'apikey':        SUPABASE_ANON,
-        'Authorization': `Bearer ${SUPABASE_ANON}`,
-        'Content-Type':  'application/json',
-      },
-      body: JSON.stringify(params),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'RPC error');
-    return data;
-  },
-};
-
-// ── State ──────────────────────────────────────────────────────
-let uploadedFile = null;
-
-// ── DOM refs ───────────────────────────────────────────────────
-const uploadZone   = document.getElementById('uploadZone');
-const fileInput    = document.getElementById('fileInput');
-const uploadIdle   = document.getElementById('uploadIdle');
-const uploadPreview= document.getElementById('uploadPreview');
-const previewImg   = document.getElementById('previewImg');
-const removeImg    = document.getElementById('removeImg');
-const codeInput    = document.getElementById('codeInput');
-const stepUpload   = document.getElementById('stepUpload');
-const stepLoading  = document.getElementById('stepLoading');
-const stepResult   = document.getElementById('stepResult');
-const resultContent= document.getElementById('resultContent');
-const loadingMsg   = document.getElementById('loadingMsg');
-const ls           = [null,'ls1','ls2','ls3','ls4'].map(id => id && document.getElementById(id));
-
-// ── Upload zone setup ──────────────────────────────────────────
-uploadZone.addEventListener('click', e => {
-  if (e.target === removeImg || removeImg.contains(e.target)) return;
-  if (!uploadedFile) fileInput.click();
-});
-
-uploadZone.addEventListener('dragover', e => {
-  e.preventDefault();
-  uploadZone.classList.add('drag-over');
-});
-uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
-uploadZone.addEventListener('drop', e => {
-  e.preventDefault();
-  uploadZone.classList.remove('drag-over');
-  const f = e.dataTransfer.files[0];
-  if (f && f.type.startsWith('image/')) setFile(f);
-});
-
-fileInput.addEventListener('change', () => {
-  if (fileInput.files[0]) setFile(fileInput.files[0]);
-});
-
-removeImg.addEventListener('click', e => {
-  e.stopPropagation();
-  clearFile();
-});
-
-function setFile(file) {
-  uploadedFile = file;
-  const url = URL.createObjectURL(file);
-  previewImg.src = url;
-  uploadIdle.classList.add('hidden');
-  uploadPreview.classList.remove('hidden');
+// ── API client (same origin, JSON, Bearer auth) ───────────────────
+async function api(path, { method = 'GET', body = null, form = null, auth = false } = {}) {
+  const headers = {};
+  if (auth) {
+    const t = getToken();
+    if (!t) throw new Error('You are signed out. Please sign in again.');
+    headers['Authorization'] = 'Bearer ' + t;
+  }
+  let payload = null;
+  if (form) {
+    payload = form; // FormData — browser sets the multipart boundary
+  } else if (body != null) {
+    headers['Content-Type'] = 'application/json';
+    payload = JSON.stringify(body);
+  }
+  let res;
+  try {
+    res = await fetch(path, { method, headers, body: payload });
+  } catch (e) {
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* non-JSON body */ }
+  if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
+  return data || {};
 }
 
-function clearFile() {
-  uploadedFile = null;
-  previewImg.src = '';
-  fileInput.value = '';
-  uploadIdle.classList.remove('hidden');
-  uploadPreview.classList.add('hidden');
+// ── Router ───────────────────────────────────────────────────────
+let renderSeq = 0;
+
+function currentRoute() {
+  const h = location.hash || '#/';
+  if (h === '#/app') return { name: 'app' };
+  if (h.startsWith('#/r/')) {
+    const token = decodeURIComponent(h.slice(4).split('?')[0]);
+    return token ? { name: 'redeem', token } : { name: 'landing' };
+  }
+  // Support path-style shared links in case the server serves the SPA at /r/<token>
+  const m = location.pathname.match(/^\/r\/([^\/]+)\/?$/);
+  if (m) return { name: 'redeem', token: decodeURIComponent(m[1]) };
+  return { name: 'landing' };
 }
 
-// ── Validation flow ────────────────────────────────────────────
-async function startValidation() {
-  const code = codeInput.value.trim();
-  if (!code) {
-    shakeInput();
+async function render() {
+  const seq = ++renderSeq;
+  const route = currentRoute();
+  const view = $('view');
+
+  if (route.name === 'landing') {
+    // Already have a token? Verify it and bounce straight to the app.
+    if (getToken()) {
+      try {
+        const me = await api('/api/auth/me', { auth: true });
+        if (seq !== renderSeq) return;
+        setUser(me.user); updateNav(me.user);
+        location.hash = '#/app';
+        return;
+      } catch (e) { clearToken(); clearUser(); }
+    }
+    if (seq !== renderSeq) return;
+    updateNav(null);
+    view.innerHTML = landingTpl();
+    bindLanding();
     return;
   }
 
-  // Switch to loading step
-  stepUpload.classList.add('hidden');
-  stepLoading.classList.remove('hidden');
-  stepResult.classList.add('hidden');
-
-  // Animate loading steps
-  const steps = [
-    { el: ls[1], msg: 'Uploading card image…',         delay: 0    },
-    { el: ls[2], msg: 'Reading card code…',             delay: 900  },
-    { el: ls[3], msg: 'Checking database…',             delay: 1800 },
-    { el: ls[4], msg: 'Finalizing result…',             delay: 2700 },
-  ];
-
-  for (const s of steps) {
-    setTimeout(() => {
-      steps.filter(x => x.el !== s.el).forEach(x => {
-        if (x.el) x.el.classList.remove('active');
-      });
-      if (s.el) s.el.classList.add('active');
-      loadingMsg.textContent = s.msg;
-    }, s.delay);
+  if (route.name === 'app') {
+    let me;
+    try {
+      me = await api('/api/auth/me', { auth: true });
+    } catch (e) {
+      clearToken(); clearUser(); updateNav(null);
+      location.hash = '#/';
+      return;
+    }
+    if (seq !== renderSeq) return;
+    setUser(me.user); updateNav(me.user);
+    view.innerHTML = appTpl(me.user);
+    bindApp();
+    // Load the permanent share link
+    try {
+      const { link } = await api('/api/links/mine', { auth: true });
+      if (seq !== renderSeq) return;
+      const box = $('linkBox');
+      box.classList.remove('loading');
+      box.textContent = link || 'No link returned — please try again.';
+    } catch (e) {
+      if (seq !== renderSeq) return;
+      const box = $('linkBox');
+      box.classList.remove('loading');
+      box.textContent = 'Could not load your link: ' + e.message;
+    }
+    return;
   }
 
-  try {
-    // 1. Upload image (or skip if none)
-    let imageUrl = null;
-    if (uploadedFile) {
-      imageUrl = await supa.upload(uploadedFile);
+  if (route.name === 'redeem') {
+    updateNav(getUser());
+    view.innerHTML = redeemResolvingTpl();
+    let res;
+    try {
+      res = await api('/api/links/resolve?token=' + encodeURIComponent(route.token));
+    } catch (e) {
+      res = { valid: false };
     }
-    if (ls[1]) { ls[1].classList.remove('active'); ls[1].classList.add('done'); }
+    if (seq !== renderSeq) return;
+    if (!res || !res.valid) {
+      view.innerHTML = invalidLinkTpl();
+    } else {
+      view.innerHTML = redeemTpl(res.owner_name, route.token);
+      bindRedeem(route.token);
+    }
+    return;
+  }
+}
 
-    // 2. Validate via Supabase RPC
-    const result = await supa.rpc('validate_card_code', {
-      p_code:      code,
-      p_image_url: imageUrl,
-      p_ip:        null,
-      p_agent:     navigator.userAgent,
-    });
-    if (ls[2]) { ls[2].classList.remove('active'); ls[2].classList.add('done'); }
-    if (ls[3]) { ls[3].classList.remove('active'); ls[3].classList.add('done'); }
+window.addEventListener('hashchange', render);
 
-    await sleep(600);
-    if (ls[4]) { ls[4].classList.remove('active'); ls[4].classList.add('done'); }
+// ── Navbar ───────────────────────────────────────────────────────
+function updateNav(user) {
+  const el = $('navStatus');
+  if (user && user.email) {
+    el.innerHTML =
+      '<div class="nav-user">' +
+        '<span class="status-dot"></span>' +
+        '<span class="user-email">' + escHtml(user.email) + '</span>' +
+        '<button class="link-signout" id="navSignout">Sign out</button>' +
+      '</div>';
+    $('navSignout').addEventListener('click', doSignout);
+  } else {
+    el.innerHTML = '<span class="status-dot"></span><span class="status-text">Live System</span>';
+  }
+}
 
+async function doSignout() {
+  try { await api('/api/auth/signout', { method: 'POST', auth: true }); } catch (e) { /* best effort */ }
+  clearToken(); clearUser(); updateNav(null);
+  location.hash = '#/';
+}
+
+// ── Templates ────────────────────────────────────────────────────
+function landingTpl() {
+  return `
+  <section class="hero">
+    <div class="hero-badge glass-chip"><span class="chip-dot"></span>Instant Card Verification</div>
+    <h1 class="hero-title">Validate Your<br/><span class="gradient-text">Gift Card</span></h1>
+    <p class="hero-sub">Sign in or create a free account to get your personal share link — then anyone with your link can verify cards instantly.</p>
+  </section>
+  <div class="main-container">
+    <div class="validator-card mirror-glass">
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tabSignin" type="button">Sign In</button>
+        <button class="auth-tab" id="tabSignup" type="button">Sign Up</button>
+      </div>
+      <div id="authError" class="form-error hidden"></div>
+      <form id="signinForm" class="auth-form" novalidate>
+        <div class="form-field">
+          <label for="siEmail">Email</label>
+          <input type="email" id="siEmail" class="form-input" placeholder="you@example.com" autocomplete="email" />
+        </div>
+        <div class="form-field">
+          <label for="siPass">Password</label>
+          <input type="password" id="siPass" class="form-input" placeholder="••••••••" autocomplete="current-password" />
+        </div>
+        <button class="btn-validate liquid-glass" type="submit"><span class="btn-text">Sign In</span></button>
+      </form>
+      <form id="signupForm" class="auth-form hidden" novalidate>
+        <div class="form-field">
+          <label for="suName">Name</label>
+          <input type="text" id="suName" class="form-input" placeholder="Your name or business" autocomplete="name" />
+        </div>
+        <div class="form-field">
+          <label for="suEmail">Email</label>
+          <input type="email" id="suEmail" class="form-input" placeholder="you@example.com" autocomplete="email" />
+        </div>
+        <div class="form-field">
+          <label for="suPass">Password <span class="field-hint">(min 8 characters)</span></label>
+          <input type="password" id="suPass" class="form-input" placeholder="••••••••" autocomplete="new-password" />
+        </div>
+        <button class="btn-validate liquid-glass" type="submit"><span class="btn-text">Create Account</span></button>
+      </form>
+    </div>
+  </div>`;
+}
+
+function appTpl(user) {
+  return `
+  <section class="hero slim">
+    <div class="hero-badge glass-chip"><span class="chip-dot"></span>Welcome back</div>
+    <h1 class="hero-title">Your <span class="gradient-text">Share Link</span></h1>
+  </section>
+  <div class="main-container">
+    <div class="validator-card mirror-glass">
+      <div class="step-header">
+        <div class="step-num">∞</div>
+        <div>
+          <h2 class="step-title">My permanent link</h2>
+          <p class="step-desc">One link per account — it always works</p>
+        </div>
+      </div>
+      <div class="link-box loading" id="linkBox">Loading your link…</div>
+      <div class="link-actions">
+        <button class="btn-validate liquid-glass btn-half" id="copyBtn" type="button"><span class="btn-text">Copy Link</span></button>
+        <button class="btn-ghost btn-half" id="regenBtn" type="button"><span class="btn-text">Regenerate</span></button>
+      </div>
+      <div class="note-box">
+        Anyone with this link can validate cards through it — no account needed on their side.
+        Share it with your customers. If it ever falls into the wrong hands, hit
+        <b>Regenerate</b> and the old link stops working instantly.
+      </div>
+      <div class="user-row">
+        <span class="user-email">${escHtml(user.email)}</span>
+        <button class="link-signout" id="signoutBtn" type="button">Sign out</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function redeemResolvingTpl() {
+  return `
+  <section class="hero slim">
+    <div class="hero-badge glass-chip"><span class="chip-dot"></span>Shared Validation Link</div>
+    <h1 class="hero-title">Checking <span class="gradient-text">Link</span></h1>
+  </section>
+  <div class="main-container">
+    <div class="validator-card mirror-glass">
+      <div class="loading-center">
+        <div class="spiral-loader-wrap"><div class="spiral-loader">
+          <div class="spiral-ring ring-1"></div><div class="spiral-ring ring-2"></div>
+          <div class="spiral-ring ring-3"></div><div class="spiral-core"></div>
+        </div></div>
+        <p class="loading-sub">Verifying this share link…</p>
+      </div>
+    </div>
+  </div>`;
+}
+
+function invalidLinkTpl() {
+  return `
+  <section class="hero slim">
+    <div class="hero-badge glass-chip"><span class="chip-dot"></span>Shared Validation Link</div>
+    <h1 class="hero-title">Link <span class="gradient-text">Not Found</span></h1>
+  </section>
+  <div class="main-container">
+    <div class="validator-card mirror-glass">
+      <div class="result-center">
+        <div class="result-icon invalid">❌</div>
+        <h2 class="result-title invalid">Invalid Link</h2>
+        <p class="result-msg">This share link doesn't exist or is no longer active. Ask the owner for a fresh one.</p>
+      </div>
+    </div>
+  </div>`;
+}
+
+function redeemTpl(ownerName, token) {
+  return `
+  <section class="hero slim">
+    <div class="hero-badge glass-chip"><span class="chip-dot"></span>Shared Validation Link</div>
+    <h1 class="hero-title">Validate a <span class="gradient-text">Gift Card</span></h1>
+    <p class="hero-sub">via ${escHtml(ownerName)}'s link</p>
+  </section>
+  <div class="main-container">
+    <div class="validator-card mirror-glass" id="validatorCard">
+
+      <div class="step" id="stepUpload">
+        <div class="step-header">
+          <div class="step-num">01</div>
+          <div>
+            <h2 class="step-title">Upload Card Image <span class="field-hint">(optional)</span></h2>
+            <p class="step-desc">Take a clear photo of the gift card</p>
+          </div>
+        </div>
+
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="fileInput" accept="image/*" hidden />
+          <div class="upload-idle" id="uploadIdle">
+            <div class="upload-icon-wrap glass-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <p class="upload-label">Drag &amp; drop or <button class="upload-browse" id="browseBtn" type="button">browse</button></p>
+            <p class="upload-hint">PNG, JPG, WEBP — max 10 MB</p>
+          </div>
+          <div class="upload-preview hidden" id="uploadPreview">
+            <img id="previewImg" src="" alt="Card preview" />
+            <button class="remove-img glass-chip" id="removeImg" type="button">✕ Remove</button>
+          </div>
+        </div>
+
+        <div class="step-header" style="margin-top:28px">
+          <div class="step-num">02</div>
+          <div>
+            <h2 class="step-title">Enter Card Code</h2>
+            <p class="step-desc">Type or paste the code exactly as printed</p>
+          </div>
+        </div>
+
+        <div class="code-input-wrap" id="codeWrap">
+          <div class="code-prefix">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="5" y="11" width="14" height="10" rx="2"/>
+              <path d="M8 11V7a4 4 0 018 0v4"/>
+            </svg>
+          </div>
+          <input type="text" id="codeInput" class="code-input" placeholder="e.g. CARD-ALPHA-001"
+                 autocomplete="off" spellcheck="false" />
+        </div>
+
+        <button class="btn-validate liquid-glass" id="validateBtn" type="button">
+          <span class="btn-text">Validate Card</span>
+          <svg class="btn-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+
+        <p class="privacy-note">
+          <svg viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1l6 2.5v4C14 11.5 11.5 14.5 8 15 4.5 14.5 2 11.5 2 7.5v-4L8 1z"/>
+          </svg>
+          Your data is encrypted and stored securely.
+        </p>
+      </div>
+
+      <div class="step hidden" id="stepLoading">
+        <div class="loading-center">
+          <div class="spiral-loader-wrap"><div class="spiral-loader">
+            <div class="spiral-ring ring-1"></div><div class="spiral-ring ring-2"></div>
+            <div class="spiral-ring ring-3"></div><div class="spiral-core"></div>
+          </div></div>
+          <h2 class="loading-title">Validating Your Card</h2>
+          <p class="loading-sub" id="loadingMsg">Connecting to verification server...</p>
+          <div class="loading-steps">
+            <div class="ls-item" id="ls1"><span class="ls-dot"></span> Uploading image</div>
+            <div class="ls-item" id="ls2"><span class="ls-dot"></span> Reading card code</div>
+            <div class="ls-item" id="ls3"><span class="ls-dot"></span> Verifying with database</div>
+            <div class="ls-item" id="ls4"><span class="ls-dot"></span> Finalizing result</div>
+          </div>
+          <p class="please-wait">Please wait while we validate your card…</p>
+        </div>
+      </div>
+
+      <div class="step hidden" id="stepResult">
+        <div class="result-center" id="resultContent"></div>
+        <button class="btn-validate liquid-glass" style="margin-top:32px" id="againBtn" type="button">
+          <span class="btn-text">Validate Another Card</span>
+        </button>
+      </div>
+
+    </div>
+  </div>`;
+}
+
+// ── Landing bindings ─────────────────────────────────────────────
+function showAuthError(msg) {
+  const el = $('authError');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+function bindLanding() {
+  const tabIn = $('tabSignin'), tabUp = $('tabSignup');
+  const formIn = $('signinForm'), formUp = $('signupForm');
+
+  function selectTab(which) {
+    const isIn = which === 'signin';
+    tabIn.classList.toggle('active', isIn);
+    tabUp.classList.toggle('active', !isIn);
+    formIn.classList.toggle('hidden', !isIn);
+    formUp.classList.toggle('hidden', isIn);
+    $('authError').classList.add('hidden');
+  }
+  tabIn.addEventListener('click', () => selectTab('signin'));
+  tabUp.addEventListener('click', () => selectTab('signup'));
+
+  formIn.addEventListener('submit', async e => {
+    e.preventDefault();
+    const email = $('siEmail').value.trim();
+    const password = $('siPass').value;
+    if (!email || !password) { showAuthError('Please enter your email and password.'); return; }
+    try {
+      const { user, token } = await api('/api/auth/signin', {
+        method: 'POST', body: { email, password }
+      });
+      setToken(token); setUser(user);
+      location.hash = '#/app';
+    } catch (err) { showAuthError(err.message); }
+  });
+
+  formUp.addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = $('suName').value.trim();
+    const email = $('suEmail').value.trim();
+    const password = $('suPass').value;
+    if (!name) { showAuthError('Please enter your name.'); return; }
+    if (!email) { showAuthError('Please enter your email address.'); return; }
+    if (password.length < 8) { showAuthError('Password must be at least 8 characters.'); return; }
+    try {
+      const { user, token } = await api('/api/auth/signup', {
+        method: 'POST', body: { name, email, password }
+      });
+      setToken(token); setUser(user);
+      location.hash = '#/app';
+    } catch (err) { showAuthError(err.message); }
+  });
+}
+
+// ── App (share link) bindings ──────────────────────────────────────
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_e) { /* noop */ }
+    ta.remove();
+    return ok;
+  }
+}
+
+function bindApp() {
+  $('copyBtn').addEventListener('click', async () => {
+    const link = $('linkBox').textContent.trim();
+    if (!link || $('linkBox').classList.contains('loading')) return;
+    const btn = $('copyBtn').querySelector('.btn-text');
+    const ok = await copyText(link);
+    btn.textContent = ok ? 'Copied ✓' : 'Copy failed — long-press the link';
+    setTimeout(() => { btn.textContent = 'Copy Link'; }, 2200);
+  });
+
+  $('regenBtn').addEventListener('click', async () => {
+    if (!window.confirm('Regenerate your share link? The current link will stop working immediately.')) return;
+    const btn = $('regenBtn').querySelector('.btn-text');
+    btn.textContent = 'Working…';
+    try {
+      const { link } = await api('/api/links/regenerate', { method: 'POST', auth: true });
+      $('linkBox').textContent = link || 'No link returned — please try again.';
+      btn.textContent = 'Regenerated ✓';
+    } catch (e) {
+      btn.textContent = 'Regenerate';
+      window.alert('Could not regenerate: ' + e.message);
+      return;
+    }
+    setTimeout(() => { btn.textContent = 'Regenerate'; }, 2200);
+  });
+
+  $('signoutBtn').addEventListener('click', doSignout);
+}
+
+// ── Redeem (public validation) bindings ────────────────────────────
+let uploadedFile = null;
+
+function bindRedeem(linkToken) {
+  uploadedFile = null;
+  const zone = $('uploadZone'), input = $('fileInput');
+
+  function setFile(file) {
+    if (!file.type.startsWith('image/')) { window.alert('Please choose an image file.'); return; }
+    if (file.size > 10 * 1024 * 1024) { window.alert('Image is larger than 10 MB.'); return; }
+    uploadedFile = file;
+    $('previewImg').src = URL.createObjectURL(file);
+    $('uploadIdle').classList.add('hidden');
+    $('uploadPreview').classList.remove('hidden');
+  }
+  function clearFile() {
+    uploadedFile = null;
+    $('previewImg').src = '';
+    input.value = '';
+    $('uploadIdle').classList.remove('hidden');
+    $('uploadPreview').classList.add('hidden');
+  }
+
+  zone.addEventListener('click', e => {
+    if (e.target.closest('#removeImg')) return;
+    if (!uploadedFile) input.click();
+  });
+  $('browseBtn').addEventListener('click', e => { e.stopPropagation(); input.click(); });
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) setFile(f);
+  });
+  input.addEventListener('change', () => { if (input.files[0]) setFile(input.files[0]); });
+  $('removeImg').addEventListener('click', e => { e.stopPropagation(); clearFile(); });
+
+  $('validateBtn').addEventListener('click', () => startValidation(linkToken));
+  $('againBtn').addEventListener('click', () => render()); // re-render the same route
+}
+
+function shakeInput() {
+  const wrap = $('codeWrap');
+  wrap.style.animation = 'none';
+  void wrap.offsetHeight; // reflow
+  wrap.style.animation = 'shake 0.4s ease';
+  setTimeout(() => { wrap.style.animation = ''; }, 400);
+  $('codeInput').focus();
+}
+
+function setStep(n, state) {
+  const el = $('ls' + n);
+  if (!el) return;
+  el.classList.remove('active', 'done');
+  if (state) el.classList.add(state);
+}
+
+async function startValidation(linkToken) {
+  const code = $('codeInput').value.trim();
+  if (!code) { shakeInput(); return; }
+
+  $('stepUpload').classList.add('hidden');
+  $('stepResult').classList.add('hidden');
+  $('stepLoading').classList.remove('hidden');
+  [1, 2, 3, 4].forEach(n => setStep(n, null));
+
+  try {
+    // 1. Upload image first (only if one was chosen)
+    let imageUrl = null;
+    setStep(1, 'active');
+    $('loadingMsg').textContent = uploadedFile ? 'Uploading card image…' : 'Skipping image upload…';
+    if (uploadedFile) {
+      const fd = new FormData();
+      fd.append('image', uploadedFile);
+      fd.append('link_token', linkToken);
+      const up = await api('/api/upload', { method: 'POST', form: fd });
+      imageUrl = up.image_url;
+    }
     await sleep(400);
-    showResult(result.status, result.code);
+    setStep(1, 'done');
 
+    // 2-3. Validate the code
+    setStep(2, 'active');
+    $('loadingMsg').textContent = 'Reading card code…';
+    await sleep(500);
+    setStep(2, 'done');
+    setStep(3, 'active');
+    $('loadingMsg').textContent = 'Checking database…';
+    const body = { code, link_token: linkToken };
+    if (imageUrl) body.image_url = imageUrl;
+    const result = await api('/api/validate', { method: 'POST', body });
+    setStep(3, 'done');
+
+    // 4. Finalize
+    setStep(4, 'active');
+    $('loadingMsg').textContent = 'Finalizing result…';
+    await sleep(500);
+    setStep(4, 'done');
+    await sleep(300);
+    showResult(result.status, result.code);
   } catch (err) {
     console.error(err);
     showResult('error', code, err.message);
@@ -169,76 +584,49 @@ async function startValidation() {
 }
 
 function showResult(status, code, errMsg) {
-  stepLoading.classList.add('hidden');
-  stepResult.classList.remove('hidden');
+  $('stepLoading').classList.add('hidden');
+  $('stepResult').classList.remove('hidden');
 
   const configs = {
     valid: {
-      icon:  '✅',
-      cls:   'valid',
+      icon: '✅', cls: 'valid',
       title: 'Card Verified!',
-      msg:   'Your gift card is valid and ready to use. Enjoy!',
+      msg: 'This gift card is valid and ready to use. Enjoy!',
     },
     used: {
-      icon:  '⚠️',
-      cls:   'used',
+      icon: '⚠️', cls: 'used',
       title: 'Already Used',
-      msg:   'This card has already been redeemed. If you believe this is an error, please contact support.',
+      msg: 'This card has already been redeemed. If you believe this is an error, please contact support.',
     },
     invalid: {
-      icon:  '❌',
-      cls:   'invalid',
+      icon: '❌', cls: 'invalid',
       title: 'Invalid Code',
-      msg:   'We couldn\'t find this card code in our system. Please double-check and try again.',
+      msg: "We couldn't find this card code in the system. Please double-check and try again.",
     },
     error: {
-      icon:  '⚡',
-      cls:   'invalid',
+      icon: '⚡', cls: 'invalid',
       title: 'Connection Error',
-      msg:   errMsg || 'Something went wrong. Please check your connection and try again.',
+      msg: errMsg || 'Something went wrong. Please check your connection and try again.',
     },
   };
-
   const c = configs[status] || configs.invalid;
 
-  resultContent.innerHTML = `
-    <div class="result-icon ${c.cls}">${c.icon}</div>
-    <h2 class="result-title ${c.cls}">${c.title}</h2>
-    <div class="result-code">${escHtml(code)}</div>
-    <p class="result-msg">${c.msg}</p>
-  `;
+  $('resultContent').innerHTML =
+    '<div class="result-icon ' + c.cls + '">' + c.icon + '</div>' +
+    '<h2 class="result-title ' + c.cls + '">' + c.title + '</h2>' +
+    '<div class="result-code">' + escHtml(code) + '</div>' +
+    '<p class="result-msg">' + escHtml(c.msg) + '</p>';
 }
 
-function resetForm() {
-  stepResult.classList.add('hidden');
-  stepLoading.classList.add('hidden');
-  stepUpload.classList.remove('hidden');
-  clearFile();
-  codeInput.value = '';
-  ls.filter(Boolean).forEach(el => el.classList.remove('active','done'));
-}
-
-function shakeInput() {
-  const wrap = codeInput.closest('.code-input-wrap');
-  wrap.style.animation = 'none';
-  wrap.offsetHeight; // reflow
-  wrap.style.animation = 'shake 0.4s ease';
-  setTimeout(() => wrap.style.animation = '', 400);
-  codeInput.focus();
-}
-
-// ── Utils ──────────────────────────────────────────────────────
-const sleep    = ms => new Promise(r => setTimeout(r, ms));
-const escHtml  = s  => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
-// ── Animated background canvas ─────────────────────────────────
+// ── Animated background canvas ───────────────────────────────────
 (function initCanvas() {
-  const canvas = document.getElementById('bg-canvas');
-  const ctx    = canvas.getContext('2d');
-  let   W, H, particles = [];
+  const canvas = $('bg-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let W, H, particles = [];
 
   function resize() {
-    W = canvas.width  = window.innerWidth;
+    W = canvas.width = window.innerWidth;
     H = canvas.height = window.innerHeight;
   }
   window.addEventListener('resize', resize);
@@ -262,7 +650,7 @@ const escHtml  = s  => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'
     draw() {
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(180,170,255,${this.a})`;
+      ctx.fillStyle = 'rgba(180,170,255,' + this.a + ')';
       ctx.fill();
     }
   }
@@ -272,17 +660,16 @@ const escHtml  = s  => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'
   function frame() {
     ctx.clearRect(0, 0, W, H);
     for (const p of particles) { p.update(); p.draw(); }
-    // Draw lines between close particles
     for (let i = 0; i < particles.length; i++) {
       for (let j = i + 1; j < particles.length; j++) {
         const dx = particles[i].x - particles[j].x;
         const dy = particles[i].y - particles[j].y;
-        const d  = Math.sqrt(dx*dx + dy*dy);
+        const d = Math.sqrt(dx * dx + dy * dy);
         if (d < 80) {
           ctx.beginPath();
           ctx.moveTo(particles[i].x, particles[i].y);
           ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = `rgba(124,109,250,${0.08 * (1 - d/80)})`;
+          ctx.strokeStyle = 'rgba(124,109,250,' + (0.08 * (1 - d / 80)) + ')';
           ctx.lineWidth = 0.5;
           ctx.stroke();
         }
@@ -294,8 +681,9 @@ const escHtml  = s  => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'
 })();
 
 // ── Inject shake keyframe ──────────────────────────────────────
-const style = document.createElement('style');
-style.textContent = `
+(function injectShake() {
+  const style = document.createElement('style');
+  style.textContent = `
 @keyframes shake {
   0%,100% { transform: translateX(0); }
   20%     { transform: translateX(-6px); }
@@ -303,4 +691,8 @@ style.textContent = `
   60%     { transform: translateX(-4px); }
   80%     { transform: translateX(4px); }
 }`;
-document.head.appendChild(style);
+  document.head.appendChild(style);
+})();
+
+// ── Boot ─────────────────────────────────────────────────────────
+render();

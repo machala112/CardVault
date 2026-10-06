@@ -1,0 +1,29 @@
+# CardVault API — Cloudflare Worker
+# Serves the dashboard (static assets) + the /api/* backend.
+#
+# One-time setup (run from the repo root):
+#   npm i -g wrangler
+#   wrangler login
+#   wrangler d1 create cardvault-db        # paste the database_id below
+#   wrangler r2 bucket create cardvault-images
+#   wrangler d1 execute cardvault-db --file workers/api/migrations/0001_init.sql --remote
+#   wrangler secret put FCM_SERVICE_ACCOUNT_JSON   # paste the Firebase service-account JSON
+#   wrangler secret put ADMIN_EMAIL                # the email that becomes admin on signup
+#
+# Deploy: wrangler deploy   (or push to main — .github/workflows/deploy-worker.yml)
+
+name = "cardvault-api"
+main = "workers/api/src/index.js"
+compatibility_date = "2026-10-06"
+
+[assets]
+directory = "dashboard"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cardvault-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "cardvault-images"

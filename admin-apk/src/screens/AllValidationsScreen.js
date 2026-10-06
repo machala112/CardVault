@@ -5,7 +5,7 @@ import {
   TouchableOpacity, TextInput, RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fetchValidations } from '../services/supabase';
+import { fetchValidations } from '../services/api';
 import ValidationRow from '../components/ValidationRow';
 import { colors, typography } from '../theme';
 

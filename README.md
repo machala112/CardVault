@@ -1,169 +1,149 @@
-# CardValidator — Full Stack System
+# CardVault
 
-A complete card validation system with a mirror-glass frontend website and a professional Android admin app with real-time push notifications.
+A gift-card / voucher code validation system. Users sign up, get a **permanent
+personal share link**, and anyone opening that link can validate card codes
+against the owner's code list. Admins manage everything from an Android app
+with **instant push notifications** on every validation.
 
----
-
-## 📁 Project Structure
+## Architecture
 
 ```
-CardValidator/
-├── dashboard/              ← Frontend website (HTML/CSS/JS)
-│   ├── index.html
-│   ├── style.css
-│   └── app.js
-├── sql/
-│   └── schema.sql          ← Supabase database schema + functions
-└── admin-apk/              ← Android admin app (React Native / Expo)
-    ├── App.js
-    ├── app.json
-    ├── eas.json
-    ├── package.json
-    ├── babel.config.js
-    ├── src/
-    │   ├── screens/
-    │   │   ├── DashboardScreen.js
-    │   │   ├── AllValidationsScreen.js
-    │   │   ├── ValidationDetailScreen.js
-    │   │   └── SettingsScreen.js
-    │   ├── components/
-    │   │   ├── StatCard.js
-    │   │   └── ValidationRow.js
-    │   ├── services/
-    │   │   ├── supabase.js
-    │   │   └── backgroundService.js
-    │   └── theme.js
-    └── .github/
-        └── workflows/
-            └── build-apk.yml   ← GitHub Actions CI/CD
+┌──────────────┐      ┌─────────────────────────────────────────┐
+│  Dashboard   │─────▶│  Cloudflare Worker (workers/api)        │
+│  (static,    │      │  · Auth: signup / signin (PBKDF2, D1)   │
+│   served by  │      │  · Permanent share links (one per user) │
+│   the Worker)│      │  · Card validation (atomic in D1)       │
+└──────────────┘      │  · Image upload → R2                    │
+                      │  · Admin API                            │
+┌──────────────┐      │  · Firebase push on every validation    │
+│  Admin APK   │─────▶│                                         │
+│  (Expo)      │      └──────┬──────────────────┬───────────────┘
+└──────────────┘             │                  │
+                        ┌────▼────┐        ┌────▼────┐
+                        │ D1 (DB) │        │ R2 (img)│
+                        └─────────┘        └─────────┘
 ```
 
----
+- **Cloudflare Workers** — the entire backend (`workers/api/src/`): auth,
+  links, validation, uploads, admin endpoints. Also serves the dashboard.
+- **Cloudflare D1** — database: `users`, `sessions`, `share_links`,
+  `card_codes`, `card_validations`, `push_tokens`.
+  Schema: `workers/api/migrations/0001_init.sql`.
+- **Cloudflare R2** — card image storage (bucket `cardvault-images`),
+  served back via `/img/<key>`.
+- **Firebase Cloud Messaging** — instant push to admin phones on every
+  validation (replaces polling). The Worker mints its own OAuth token from
+  a service-account secret; no Firebase Admin SDK needed.
 
-## 🗄️ Step 1 — Supabase Setup
+## Project layout
 
-1. Go to [supabase.com](https://supabase.com) → New Project
-2. Open **SQL Editor** → paste and run `sql/schema.sql`
-3. Go to **Storage** → create a bucket named `card-images` → set to **public**
-4. Note your **Project URL** and **anon public key** (Settings → API)
-5. Note your **service role key** (keep secret — admin only)
-
----
-
-## 🌐 Step 2 — Frontend Dashboard
-
-Edit `dashboard/app.js`, lines 6–7:
-
-```js
-const SUPABASE_URL  = 'https://YOUR_PROJECT.supabase.co';
-const SUPABASE_ANON = 'YOUR_ANON_PUBLIC_KEY';
+```
+CardVault/
+├── workers/api/            ← Cloudflare Worker backend
+│   ├── src/index.js        ← router + all endpoints
+│   ├── src/auth.js         ← PBKDF2 hashing, sessions, link tokens
+│   ├── src/fcm.js          ← Firebase Cloud Messaging sender
+│   └── migrations/0001_init.sql  ← D1 schema
+├── dashboard/              ← static SPA (signup/signin, my link, validation)
+├── admin-apk/              ← Expo admin Android app
+├── wrangler.toml
+└── .github/workflows/
+    ├── deploy-worker.yml   ← deploys Worker + dashboard + D1 migrations
+    └── build-apk.yml       ← builds the admin APK
 ```
 
-Then open `dashboard/index.html` in any browser. No server needed — it's pure static HTML/JS/CSS.
+## One-time setup
 
-**To host it:**
-- Drag the `dashboard/` folder to [Netlify Drop](https://app.netlify.com/drop)
-- Or push to GitHub and enable Pages
-- Or use Vercel, Cloudflare Pages, etc.
-
----
-
-## 📱 Step 3 — Admin APK
-
-### Prerequisites
-```bash
-npm install -g eas-cli
-eas login
-```
-
-### Configure credentials
-
-Keys are injected at build time — never committed. For **local** builds, create `admin-apk/.env`:
+### 1. Cloudflare
 
 ```bash
-EXPO_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-EXPO_PUBLIC_SUPABASE_SERVICE_KEY=YOUR_SERVICE_ROLE_KEY
+npm i -g wrangler
+wrangler login
+wrangler d1 create cardvault-db        # paste database_id into wrangler.toml
+wrangler r2 bucket create cardvault-images
+wrangler d1 execute cardvault-db --file workers/api/migrations/0001_init.sql --remote
+wrangler secret put FCM_SERVICE_ACCOUNT_JSON   # Firebase service-account JSON (see below)
+wrangler secret put ADMIN_EMAIL                # your email → becomes admin on signup
+wrangler deploy
 ```
 
-For **GitHub Actions** builds, add these **repository secrets** (Settings → Secrets → Actions):
+### 2. Firebase (push notifications)
 
-### Build locally
+1. In the [Firebase console](https://console.firebase.google.com), create a
+   project (or reuse one) and add an **Android** app with your package name.
+2. Download `google-services.json` → store it as the repo secret
+   `GOOGLE_SERVICES_JSON` (Settings → Secrets → Actions). The APK workflow
+   writes it at build time; it is never committed.
+3. Project Settings → Service accounts → **Generate new private key** →
+   paste the JSON into `wrangler secret put FCM_SERVICE_ACCOUNT_JSON`.
+
+### 3. GitHub secrets
+
+| Secret | Used by | Purpose |
+|---|---|---|
+| `CLOUDFLARE_API_TOKEN` | deploy-worker | Worker deploys |
+| `CLOUDFLARE_ACCOUNT_ID` | deploy-worker | Worker deploys |
+| `API_URL` | build-apk | Worker URL baked into the APK (`EXPO_PUBLIC_API_URL`) |
+| `GOOGLE_SERVICES_JSON` | build-apk | Firebase config for push |
+
+## Using it
+
+1. Open the deployed Worker URL → **sign up** (the `ADMIN_EMAIL` address
+   becomes the admin).
+2. Your **share link** is on the home screen — copy it and send it to
+   whoever needs to validate cards. It never expires; regenerate it anytime
+   if it leaks.
+3. Add card codes from the admin APK (Codes tab), or insert directly:
+   ```bash
+   wrangler d1 execute cardvault-db --remote \
+     --command "INSERT INTO card_codes (id, code, notes, created_at)
+                VALUES (lower(hex(randomblob(16))), 'MY-CODE-001', 'Batch 1', datetime('now'))"
+   ```
+4. Anyone opening your link can validate a code (+ optional card photo).
+   You get an **instant push** on your admin phone for every attempt.
+
+## API reference
+
+All JSON. Authenticated calls send `Authorization: Bearer <token>`.
+
+| Method & path | Auth | Description |
+|---|---|---|
+| `POST /api/auth/signup` | – | `{email, password, name}` → `{user, token, link}` |
+| `POST /api/auth/signin` | – | `{email, password}` → `{user, token}` |
+| `POST /api/auth/signout` | user | Invalidate session |
+| `GET /api/auth/me` | user | Current user |
+| `GET /api/links/mine` | user | Your permanent share link |
+| `POST /api/links/regenerate` | user | New link, old one dies |
+| `GET /api/links/resolve?token=` | – | Check a share link |
+| `POST /api/upload` | link | Multipart `image` + `link_token` → `{image_url}` |
+| `POST /api/validate` | link | `{code, link_token, image_url?}` → `{status, code}` |
+| `GET /img/<key>` | – | Stored card image |
+| `GET /api/admin/validations` | admin | List, `?limit&status` |
+| `GET /api/admin/validations/:id` | admin | Detail |
+| `GET /api/admin/stats` | admin | Counts |
+| `GET /api/admin/codes` | admin | Code list |
+| `POST /api/admin/codes` | admin | Add `{code, notes}` |
+| `DELETE /api/admin/codes/:id` | admin | Remove |
+| `POST /api/admin/push-tokens` | admin | Register FCM device token |
+
+Validation statuses: `valid` (first use, now marked used), `used`
+(already redeemed), `invalid` (unknown code).
+
+## Local development
+
 ```bash
-cd admin-apk
-npm install
-eas build --platform android --profile production
+# Terminal 1 — Worker + dashboard with a local D1
+npx wrangler dev --local
+# Terminal 2 — admin app
+cd admin-apk && EXPO_PUBLIC_API_URL=http://localhost:8787 npx expo start
 ```
 
-### Build via GitHub Actions (CI/CD)
+## Security notes
 
-1. Push this repo to GitHub
-2. Add these **repository secrets** (Settings → Secrets → Actions):
-   - `SUPABASE_URL` — your project URL
-   - `SUPABASE_SERVICE_KEY` — your service role key
-3. Push to `main` branch → Actions tab → APK builds automatically
-4. Download APK from the **Artifacts** tab
-
-### Install APK
-- Enable **Unknown sources** on your Android device
-- Download and install `cardvalidator-admin.apk`
-
----
-
-## 🔔 Notification Sound (Hardcore)
-
-Place your custom audio file at:
-```
-admin-apk/assets/sounds/hardcore.mp3
-```
-
-The app uses this as the notification sound. You can swap it for any `.mp3` file. The Settings screen lets you choose from multiple sound options.
-
----
-
-## ♻️ Heartbeat / Keep-Alive
-
-The admin APK runs a **background task every 30 seconds** that:
-1. Pings Supabase to check for new card validations
-2. Keeps the Realtime WebSocket connection alive
-3. Sends push notifications for new validations
-4. Runs even when the app is closed or the phone is rebooted
-
-The frontend website has no backend to keep alive — Supabase handles this automatically.
-
----
-
-## 🗃️ Supabase Tables
-
-| Table | Purpose |
-|-------|---------|
-| `card_validations` | Every validation attempt (code, image, status, IP) |
-| `card_codes` | Master list of valid codes with used/unused state |
-
-### Add card codes (SQL Editor):
-```sql
-INSERT INTO card_codes (code, notes) VALUES
-  ('MY-CODE-001', 'Batch 1'),
-  ('MY-CODE-002', 'Batch 1');
-```
-
----
-
-## 🔑 Security Notes
-
-- The **anon key** is safe to use in the frontend (RLS policies restrict access)
-- The **service role key** is only used in the admin APK and GitHub secrets — never in the frontend
-- All validation data is stored with IP and user agent for audit purposes
-- The `validate_card_code` SQL function atomically marks codes as used to prevent race conditions
-
----
-
-## 📦 Assets Needed
-
-Create placeholder files (or add real ones):
-```
-admin-apk/assets/icon.png           (1024×1024)
-admin-apk/assets/splash.png         (1284×2778)
-admin-apk/assets/adaptive-icon.png  (1024×1024)
-admin-apk/assets/notification-icon.png (96×96, white on transparent)
-admin-apk/assets/sounds/hardcore.mp3
-```
+- Passwords: PBKDF2-SHA256, 100k iterations, per-user salt. Sessions are
+  opaque random tokens, 30-day expiry.
+- No keys are committed anywhere. The Worker reads secrets via
+  `wrangler secret`; the dashboard needs none; the APK gets its config
+  from build-time secrets.
+- The share link **is** the credential for the public validation page —
+  treat it like a password and regenerate it if shared too widely.

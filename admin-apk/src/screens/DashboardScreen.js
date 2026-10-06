@@ -5,8 +5,7 @@ import {
   TouchableOpacity, ActivityIndicator, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fetchValidations, fetchStats, subscribeToValidations } from '../services/supabase';
-import { sendNotification } from '../services/backgroundService';
+import { fetchValidations, fetchStats } from '../services/api';
 import { formatDistanceToNow } from 'date-fns';
 import StatCard from '../components/StatCard';
 import ValidationRow from '../components/ValidationRow';
@@ -18,7 +17,6 @@ export default function DashboardScreen({ navigation }) {
   const [recent,   setRecent]   = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [refresh,  setRefresh]  = useState(false);
-  const [newFlash, setNewFlash] = useState(false);
   const flashAnim = React.useRef(new Animated.Value(0)).current;
 
   const load = useCallback(async () => {
@@ -36,24 +34,9 @@ export default function DashboardScreen({ navigation }) {
 
   useEffect(() => {
     load();
-    // Realtime subscription
-    const channel = subscribeToValidations(async (newVal) => {
-      setRecent(prev => [newVal, ...prev].slice(0, 50));
-      setStats(prev => prev ? {
-        ...prev,
-        total:   (prev.total   || 0) + 1,
-        [newVal.status]: (prev[newVal.status] || 0) + 1,
-      } : prev);
-      // Flash effect
-      setNewFlash(true);
-      Animated.sequence([
-        Animated.timing(flashAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
-        Animated.timing(flashAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
-      ]).start(() => setNewFlash(false));
-      await sendNotification(newVal);
-    });
-    return () => { channel.unsubscribe(); };
-  }, []);
+    // New validations arrive as FCM push notifications (see App.js);
+    // the list refreshes on mount and on pull-to-refresh.
+  }, [load]);
 
   const flashBg = flashAnim.interpolate({
     inputRange:  [0, 1],
@@ -89,7 +72,7 @@ export default function DashboardScreen({ navigation }) {
       {/* Live badge */}
       <Animated.View style={[styles.liveBadge, { backgroundColor: flashBg }]}>
         <View style={styles.liveDot} />
-        <Text style={styles.liveText}>Live — Realtime Updates Active</Text>
+        <Text style={styles.liveText}>Live — Push Alerts Active</Text>
       </Animated.View>
 
       {/* Stat cards */}

@@ -1,22 +1,18 @@
 // src/screens/SettingsScreen.js
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Switch,
   TouchableOpacity, Alert, ActivityIndicator,
-  Linking, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as TaskManager from 'expo-task-manager';
 import {
   getNotificationSettings,
   saveNotificationSettings,
   DEFAULT_SETTINGS,
   setupNotificationChannel,
   sendNotification,
-  registerHeartbeat,
-  unregisterHeartbeat,
-  HEARTBEAT_TASK,
-} from '../services/backgroundService';
+} from '../services/notifications';
+import { signout } from '../services/api';
 import { colors, typography } from '../theme';
 
 const SOUND_OPTIONS = [
@@ -26,22 +22,15 @@ const SOUND_OPTIONS = [
   { id: 'chime',     label: '🎵 Chime' },
 ];
 
-export default function SettingsScreen() {
+export default function SettingsScreen({ onSignOut }) {
   const insets = useSafeAreaInsets();
-  const [settings,   setSettings]   = useState(DEFAULT_SETTINGS);
-  const [saving,     setSaving]     = useState(false);
-  const [loaded,     setLoaded]     = useState(false);
-  const [bgRunning,  setBgRunning]  = useState(false);
-
-  const refreshBgStatus = useCallback(async () => {
-    const running = await TaskManager.isTaskRegisteredAsync(HEARTBEAT_TASK);
-    setBgRunning(running);
-  }, []);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [saving,   setSaving]   = useState(false);
+  const [loaded,   setLoaded]   = useState(false);
 
   useEffect(() => {
     getNotificationSettings().then(s => { setSettings(s); setLoaded(true); });
-    refreshBgStatus();
-  }, [refreshBgStatus]);
+  }, []);
 
   const update = async (key, val) => {
     const next = { ...settings, [key]: val };
@@ -73,6 +62,31 @@ export default function SettingsScreen() {
     setSettings(DEFAULT_SETTINGS);
   };
 
+  const handleSignOut = () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out of the admin app?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              await signout();
+            } catch (e) {
+              console.warn('Sign out request failed:', e.message);
+            } finally {
+              setSaving(false);
+              if (onSignOut) onSignOut();
+            }
+          },
+        },
+      ],
+    );
+  };
+
   if (!loaded) {
     return (
       <View style={styles.center}>
@@ -93,7 +107,7 @@ export default function SettingsScreen() {
 
       <SettingRow
         label="Enable Notifications"
-        description="Receive alerts when users validate cards"
+        description="Receive push alerts when users validate cards"
         value={settings.enabled}
         onToggle={v => update('enabled', v)}
       />
@@ -135,46 +149,6 @@ export default function SettingsScreen() {
         <SettingRow compact label="Invalid Cards" value={settings.onInvalid} onToggle={v => update('onInvalid', v)} />
       </View>
 
-      {/* Background */}
-      <SectionLabel label="Background Service" />
-      <View style={styles.card}>
-        {/* Status indicator */}
-        <View style={styles.bgStatusRow}>
-          <View style={[styles.bgDot, { backgroundColor: bgRunning ? '#4caf50' : colors.text3 }]} />
-          <Text style={styles.bgStatusText}>
-            {bgRunning ? 'Running — monitoring in background' : 'Stopped'}
-          </Text>
-        </View>
-
-        <Text style={styles.bgDesc}>
-          Registers a persistent foreground service so Android keeps this app
-          alive — even when swiped away. A silent ongoing notification appears
-          in your tray while the service is active. For best results, also
-          disable battery optimisation for this app.
-        </Text>
-        <View style={styles.bgButtons}>
-          <TouchableOpacity
-            style={[styles.btn, bgRunning && styles.btnDisabled]}
-            onPress={async () => { await registerHeartbeat(); await refreshBgStatus(); }}
-            disabled={bgRunning}
-          >
-            <Text style={styles.btnText}>▶ Start</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.btn, styles.btnDanger, !bgRunning && styles.btnDisabled]}
-            onPress={async () => { await unregisterHeartbeat(); await refreshBgStatus(); }}
-            disabled={!bgRunning}
-          >
-            <Text style={[styles.btnText, { color: colors.danger }]}>⏹ Stop</Text>
-          </TouchableOpacity>
-        </View>
-        {Platform.OS === 'android' && (
-          <TouchableOpacity style={[styles.btn, { marginTop: 10 }]} onPress={() => Linking.openSettings()}>
-            <Text style={styles.btnText}>🔋 Disable Battery Optimisation →</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
       {/* Actions */}
       <SectionLabel label="Actions" />
       <View style={styles.card}>
@@ -183,6 +157,15 @@ export default function SettingsScreen() {
         </TouchableOpacity>
         <TouchableOpacity style={[styles.btn, { marginTop: 10 }]} onPress={resetSettings}>
           <Text style={[styles.btnText, { color: colors.text3 }]}>↺ Reset to Defaults</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.btn, styles.btnDanger, { marginTop: 10 }]}
+          onPress={handleSignOut}
+          disabled={saving}
+        >
+          {saving
+            ? <ActivityIndicator color={colors.danger} size="small" />
+            : <Text style={[styles.btnText, { color: colors.danger }]}>🚪 Sign Out</Text>}
         </TouchableOpacity>
       </View>
 
@@ -227,12 +210,6 @@ const styles = StyleSheet.create({
   radio:       { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: colors.text3, alignItems: 'center', justifyContent: 'center' },
   radioSelected:{ borderColor: colors.accent },
   radioDot:    { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
-  bgDesc:      { color: colors.text2, fontSize: 13, fontFamily: typography.body, lineHeight: 20, marginBottom: 14 },
-  bgStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  bgDot:       { width: 10, height: 10, borderRadius: 5 },
-  bgStatusText:{ color: colors.text2, fontSize: 13, fontFamily: typography.body },
-  bgButtons:   { flexDirection: 'row', gap: 10 },
-  btnDisabled: { opacity: 0.4 },
   btn:         { flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 10, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: colors.glassBorder },
   btnDanger:   { borderColor: 'rgba(255,77,109,0.3)', backgroundColor: 'rgba(255,77,109,0.08)' },
   btnText:     { color: colors.text1, fontSize: 13, fontWeight: '500', fontFamily: typography.body },
