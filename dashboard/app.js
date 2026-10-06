@@ -46,13 +46,8 @@ function currentRoute() {
 
 // ── Templates ────────────────────────────────────────────────────
 function landingTpl() {
-  return `
-    <div class="landing">
-      <div class="landing-card">
-        <div class="landing-logo">⚡</div>
-        <h1>CardValidator</h1>
-      </div>
-    </div>`;
+  // Root domain is intentionally blank — only shared links work.
+  return `<div></div>`;
 }
 
 function redeemResolvingTpl() {
