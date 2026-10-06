@@ -25,12 +25,15 @@ CREATE TABLE IF NOT EXISTS share_links (
 
 CREATE TABLE IF NOT EXISTS card_codes (
   id         TEXT PRIMARY KEY,
-  code       TEXT UNIQUE NOT NULL,
+  user_id    TEXT REFERENCES users(id) ON DELETE CASCADE,
+  code       TEXT NOT NULL,
   is_used    INTEGER NOT NULL DEFAULT 0,
   used_at    TEXT,
   created_at TEXT NOT NULL,
-  notes      TEXT
+  notes      TEXT,
+  UNIQUE(user_id, code)
 );
+CREATE INDEX IF NOT EXISTS idx_codes_user ON card_codes(user_id);
 
 CREATE TABLE IF NOT EXISTS card_validations (
   id         TEXT PRIMARY KEY,

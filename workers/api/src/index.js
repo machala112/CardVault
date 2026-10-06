@@ -38,12 +38,6 @@ async function requireUser(request, env) {
   return user;
 }
 
-async function requireAdmin(request, env) {
-  const user = await requireUser(request, env);
-  if (!user.is_admin) throw err('Admin only', 403);
-  return user;
-}
-
 // ── public config + auth sync ──────────────────────────────────
 
 // Firebase web config for client SDKs. The apiKey is public-by-design
@@ -113,7 +107,7 @@ async function handleRegenerateLink(request, env) {
 async function resolveLink(env, token) {
   if (!token || typeof token !== 'string') return null;
   return env.DB.prepare(
-    `SELECT l.id, l.token, u.name AS owner_name
+    `SELECT l.id, l.token, l.user_id, u.name AS owner_name
      FROM share_links l JOIN users u ON u.id = l.user_id
      WHERE l.token = ?`
   ).bind(token).first();
@@ -160,15 +154,15 @@ async function handleValidate(request, env, ctx) {
   if (!clean) return err('Enter a card code');
 
   const row = await env.DB.prepare(
-    'SELECT id, is_used FROM card_codes WHERE code = ?').bind(clean).first();
+    'SELECT id, is_used FROM card_codes WHERE code = ? AND user_id = ?').bind(clean, link.user_id).first();
 
   let status;
   if (!row) {
     status = 'invalid';
   } else {
     const upd = await env.DB.prepare(
-      'UPDATE card_codes SET is_used = 1, used_at = ? WHERE code = ? AND is_used = 0'
-    ).bind(nowIso(), clean).run();
+      'UPDATE card_codes SET is_used = 1, used_at = ? WHERE code = ? AND user_id = ? AND is_used = 0'
+    ).bind(nowIso(), clean, link.user_id).run();
     status = upd.meta.changes > 0 ? 'valid' : 'used';
   }
 
@@ -180,8 +174,8 @@ async function handleValidate(request, env, ctx) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(newId(), clean, image_url, status, link.id, ip, agent, nowIso()).run();
 
-  // Instant push to admin devices — never blocks the response.
-  ctx.waitUntil(sendValidationPush(env, {
+  // Instant push to the link OWNER's devices only — never blocks the response.
+  ctx.waitUntil(sendValidationPush(env, link.user_id, {
     title: status === 'valid' ? '✅ Card validated'
          : status === 'used'   ? '⚠️ Card already used'
          :                       '❌ Invalid card code',
@@ -203,7 +197,7 @@ async function handleImage(request, env, key) {
 // ── admin ──────────────────────────────────────────────────────
 
 async function handleAdminValidations(request, env) {
-  await requireAdmin(request, env);
+  await requireUser(request, env);
   const params = new URL(request.url).searchParams;
   const limit = Math.min(Math.max(parseInt(params.get('limit') || '50', 10), 1), 200);
   const status = params.get('status');
@@ -217,15 +211,17 @@ async function handleAdminValidations(request, env) {
 }
 
 async function handleAdminValidationDetail(request, env, id) {
-  await requireAdmin(request, env);
+  await requireUser(request, env);
   const row = await env.DB.prepare(
-    'SELECT * FROM card_validations WHERE id = ?').bind(id).first();
+    `SELECT v.* FROM card_validations v
+     JOIN share_links l ON l.id = v.link_id
+     WHERE v.id = ? AND l.user_id = ?`).bind(id, user.id).first();
   if (!row) return err('Not found', 404);
   return json(row);
 }
 
 async function handleAdminStats(request, env) {
-  await requireAdmin(request, env);
+  await requireUser(request, env);
   const count = async (sql, ...b) =>
     (await env.DB.prepare(sql).bind(...b).first())?.n || 0;
   const [total, valid, used, invalid, codesTotal, codesUnused] = await Promise.all([
@@ -240,36 +236,36 @@ async function handleAdminStats(request, env) {
 }
 
 async function handleAdminCodes(request, env) {
-  await requireAdmin(request, env);
+  await requireUser(request, env);
   const rows = await env.DB.prepare(
-    'SELECT id, code, is_used, used_at, created_at, notes FROM card_codes ORDER BY created_at DESC'
-  ).all();
+    'SELECT id, code, is_used, used_at, created_at, notes FROM card_codes WHERE user_id = ? ORDER BY created_at DESC'
+  ).bind(user.id).all();
   return json((rows.results || []).map(r => ({ ...r, is_used: !!r.is_used })));
 }
 
 async function handleAdminAddCode(request, env) {
-  await requireAdmin(request, env);
+  await requireUser(request, env);
   const { code = '', notes = '' } = await readBody(request);
   const clean = code.trim().toUpperCase();
   if (!clean) return err('Enter a code');
   try {
     await env.DB.prepare(
-      'INSERT INTO card_codes (id, code, notes, created_at) VALUES (?, ?, ?, ?)'
-    ).bind(newId(), clean, notes.trim().slice(0, 200) || null, nowIso()).run();
+      'INSERT INTO card_codes (id, user_id, code, notes, created_at) VALUES (?, ?, ?, ?, ?)'
+    ).bind(newId(), user.id, clean, notes.trim().slice(0, 200) || null, nowIso()).run();
   } catch {
-    return err('That code already exists', 409);
+    return err('You already have that code', 409);
   }
   return json({ ok: true, code: clean });
 }
 
 async function handleAdminDeleteCode(request, env, id) {
-  await requireAdmin(request, env);
-  await env.DB.prepare('DELETE FROM card_codes WHERE id = ?').bind(id).run();
+  await requireUser(request, env);
+  await env.DB.prepare('DELETE FROM card_codes WHERE id = ? AND user_id = ?').bind(id, user.id).run();
   return json({ ok: true });
 }
 
 async function handleAdminPushToken(request, env) {
-  const user = await requireAdmin(request, env);
+  const user = await requireUser(request, env);
   const { token = '', platform = '' } = await readBody(request);
   if (!token) return err('Missing device token');
   await env.DB.prepare(
@@ -314,7 +310,7 @@ async function handleApi(request, env, ctx) {
 
     return err('Not found', 404);
   } catch (r) {
-    // requireUser/requireAdmin throw Response errors via err()
+    // requireUser throws Response errors via err()
     if (r instanceof Response) return r;
     console.error('API error:', r);
     return err('Something went wrong', 500);

@@ -68,7 +68,11 @@ jobs:
           grep -A3 '\[\[d1_databases\]\]' wrangler.toml
 
       - name: Apply D1 migrations
-        run: wrangler d1 execute cardvault-db --file workers/api/migrations/0001_init.sql --remote
+        run: |
+          for f in workers/api/migrations/*.sql; do
+            echo "Applying $f…"
+            wrangler d1 execute cardvault-db --file "$f" --remote
+          done
 
       - name: Set worker secrets
         run: |

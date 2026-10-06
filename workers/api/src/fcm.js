@@ -59,12 +59,12 @@ async function getCredentials(env) {
   return cached;
 }
 
-// Sends a push to every registered admin device. Never throws —
+// Sends a push to a specific user's registered devices. Never throws —
 // a notification failure must not break the validation response.
-export async function sendValidationPush(env, { title, body }) {
+export async function sendValidationPush(env, userId, { title, body }) {
   try {
     const { accessToken, projectId } = await getCredentials(env);
-    const rows = await env.DB.prepare('SELECT token FROM push_tokens').all();
+    const rows = await env.DB.prepare('SELECT token FROM push_tokens WHERE user_id = ?').bind(userId).all();
     const tokens = (rows.results || []).map(r => r.token);
     await Promise.all(tokens.map(async (token) => {
       try {
