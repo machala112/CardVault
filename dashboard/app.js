@@ -541,11 +541,18 @@ async function startValidation(linkToken) {
     setStep(1, 'active');
     $('loadingMsg').textContent = uploadedFile ? 'Uploading card image…' : 'Skipping image upload…';
     if (uploadedFile) {
-      const fd = new FormData();
-      fd.append('image', uploadedFile);
-      fd.append('link_token', linkToken);
-      const up = await api('/api/upload', { method: 'POST', form: fd });
-      imageUrl = up.image_url;
+      try {
+        const fd = new FormData();
+        fd.append('image', uploadedFile);
+        fd.append('link_token', linkToken);
+        const up = await api('/api/upload', { method: 'POST', form: fd });
+        imageUrl = up.image_url;
+      } catch (uploadErr) {
+        // If image uploads aren't available (R2 not configured), skip gracefully
+        // and continue with code validation — don't fail the whole thing.
+        console.warn('Image upload skipped:', uploadErr.message);
+        imageUrl = null;
+      }
     }
     await sleep(400);
     setStep(1, 'done');
