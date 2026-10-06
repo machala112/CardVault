@@ -131,6 +131,7 @@ async function handleResolveLink(request, env) {
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 async function handleUpload(request, env) {
+  if (!env.IMAGES) return err('Image uploads are not enabled (R2 not configured)', 503);
   let form;
   try { form = await request.formData(); }
   catch { return err('Expected a multipart form upload'); }
@@ -191,6 +192,7 @@ async function handleValidate(request, env, ctx) {
 }
 
 async function handleImage(request, env, key) {
+  if (!env.IMAGES) return err('Not found', 404);
   const obj = await env.IMAGES.get(key);
   if (!obj) return err('Not found', 404);
   const headers = { ...CORS, 'Cache-Control': 'public, max-age=31536000' };

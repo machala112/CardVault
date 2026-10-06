@@ -49,11 +49,15 @@ jobs:
           if [ -z "$DB_ID" ]; then echo "::error::Could not determine the D1 database ID"; exit 1; fi
           echo "D1 database id: $DB_ID"
           echo "db_id=$DB_ID" >> "$GITHUB_OUTPUT"
+          # R2 is optional — if it isn't enabled on the account, warn and continue.
+          # The Worker runs without image uploads until R2 is enabled and bound.
           if wrangler r2 bucket list 2>/dev/null | grep -qw 'cardvault-images'; then
             echo "R2 bucket cardvault-images already exists"
           else
             echo "Creating R2 bucket cardvault-images…"
-            wrangler r2 bucket create cardvault-images
+            if ! wrangler r2 bucket create cardvault-images 2>&1; then
+              echo "::warning::R2 bucket could not be created (is R2 enabled on the account?). Continuing without image uploads."
+            fi
           fi
 
       - name: Wire D1 database ID into wrangler.toml

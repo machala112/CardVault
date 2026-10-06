@@ -23,8 +23,12 @@ directory = "dashboard"
 [[d1_databases]]
 binding = "DB"
 database_name = "cardvault-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "f2718cb5-d064-45d0-b74f-721ee622fcfc"
 
-[[r2_buckets]]
-binding = "IMAGES"
-bucket_name = "cardvault-images"
+# R2 bucket for card images. OPTIONAL: if R2 is not enabled on the account,
+# leave this commented out — the Worker runs without image uploads.
+# To enable later: enable R2 in the Cloudflare dashboard, create the bucket,
+# uncomment the lines below, and redeploy.
+#[[r2_buckets]]
+#binding = "IMAGES"
+#bucket_name = "cardvault-images"
