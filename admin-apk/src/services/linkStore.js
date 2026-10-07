@@ -18,7 +18,11 @@ export function onShareLinkChange(fn) {
 
 export function getShareUrl() {
   if (!_link) return null;
-  // link is { token, url } or just token string
-  if (typeof _link === 'string') return `https://card.novamail.store/#/r/${_link}`;
+  // _link is usually the full URL string from the API
+  if (typeof _link === 'string') {
+    // Already a full URL? Return as-is. Otherwise build it from the token.
+    if (_link.startsWith('http')) return _link;
+    return `https://card.novamail.store/#/r/${_link}`;
+  }
   return _link.url || `https://card.novamail.store/#/r/${_link.token}`;
 }
