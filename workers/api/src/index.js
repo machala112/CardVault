@@ -10,6 +10,7 @@ import {
   verifyIdToken, getAuthUser, ensureShareLink,
 } from './auth.js';
 import { sendValidationPush } from './fcm.js';
+import { createUserDatabase, queryUserDb, queryUserDbFirst, execUserDb } from './userdb.js';
 
 // ── helpers ────────────────────────────────────────────────────
 
@@ -68,23 +69,43 @@ async function handleAuthSync(request, env) {
   }
   if (!verified) return err('Invalid or expired sign-in', 401);
 
-  const adminEmail = (env.ADMIN_EMAIL || '').trim().toLowerCase();
-  const isAdmin = adminEmail && verified.email === adminEmail ? 1 : 0;
   const id = newId();
   await env.DB.prepare(
-    `INSERT INTO users (id, firebase_uid, email, name, is_admin, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO users (id, firebase_uid, email, name, created_at)
+     VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(firebase_uid) DO UPDATE SET
        email = excluded.email,
-       name = COALESCE(excluded.name, users.name),
-       is_admin = excluded.is_admin`
-  ).bind(id, verified.uid, verified.email, verified.name, isAdmin, nowIso()).run();
+       name = COALESCE(excluded.name, users.name)`
+  ).bind(id, verified.uid, verified.email, verified.name, nowIso()).run();
 
-  const user = await env.DB.prepare(
-    'SELECT id, email, name, is_admin, created_at FROM users WHERE firebase_uid = ?'
+  let user = await env.DB.prepare(
+    'SELECT id, email, name, d1_database_id, created_at FROM users WHERE firebase_uid = ?'
   ).bind(verified.uid).first();
+
+  // Create per-user D1 database on first sync (if not exists)
+  if (!user.d1_database_id) {
+    try {
+      const dbUuid = await createUserDatabase(env, verified.uid);
+      await env.DB.prepare(
+        'UPDATE users SET d1_database_id = ? WHERE id = ?'
+      ).bind(dbUuid, user.id).run();
+      user.d1_database_id = dbUuid;
+    } catch (e) {
+      console.error('Failed to create user database:', e.message);
+      return err('Failed to provision your database. Please try again.', 500);
+    }
+  }
+
   const link = await ensureShareLink(env, originOf(request), user.id);
-  return json({ user: { ...user, is_admin: !!user.is_admin }, link });
+  return json({ user: { id: user.id, email: user.email, name: user.name, created_at: user.created_at }, link });
+}
+
+// Helper: get user's D1 database ID
+async function getUserDbId(env, userId) {
+  const row = await env.DB.prepare(
+    'SELECT d1_database_id FROM users WHERE id = ?'
+  ).bind(userId).first();
+  return row?.d1_database_id || null;
 }
 
 // ── share links ────────────────────────────────────────────────
@@ -107,7 +128,7 @@ async function handleRegenerateLink(request, env) {
 async function resolveLink(env, token) {
   if (!token || typeof token !== 'string') return null;
   return env.DB.prepare(
-    `SELECT l.id, l.token, l.user_id, u.name AS owner_name
+    `SELECT l.id, l.token, l.user_id, u.name AS owner_name, u.d1_database_id
      FROM share_links l JOIN users u ON u.id = l.user_id
      WHERE l.token = ?`
   ).bind(token).first();
@@ -153,29 +174,32 @@ async function handleValidate(request, env, ctx) {
   const clean = code.trim().toUpperCase();
   if (!clean) return err('Enter a card code');
 
-  const row = await env.DB.prepare(
-    'SELECT id, is_used FROM card_codes WHERE code = ? AND user_id = ?').bind(clean, link.user_id).first();
+  const dbId = link.d1_database_id;
+  if (!dbId) return err('User database not provisioned', 500);
+
+  const row = await queryUserDbFirst(env, dbId,
+    'SELECT id, is_used FROM card_codes WHERE code = ?', [clean]);
 
   let status;
   if (!row) {
     status = 'invalid';
   } else {
-    const upd = await env.DB.prepare(
-      'UPDATE card_codes SET is_used = 1, used_at = ? WHERE code = ? AND user_id = ? AND is_used = 0'
-    ).bind(nowIso(), clean, link.user_id).run();
-    status = upd.meta.changes > 0 ? 'valid' : 'used';
+    const upd = await execUserDb(env, dbId,
+      'UPDATE card_codes SET is_used = 1, used_at = ? WHERE code = ? AND is_used = 0',
+      [nowIso(), clean]);
+    status = upd.changes > 0 ? 'valid' : 'used';
   }
 
   const ip = request.headers.get('CF-Connecting-IP') || null;
   const agent = (request.headers.get('User-Agent') || '').slice(0, 300);
-  await env.DB.prepare(
+  await execUserDb(env, dbId,
     `INSERT INTO card_validations
        (id, card_code, image_url, status, link_id, ip_address, user_agent, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(newId(), clean, image_url, status, link.id, ip, agent, nowIso()).run();
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [newId(), clean, image_url, status, link.id, ip, agent, nowIso()]);
 
   // Instant push to the link OWNER's devices only — never blocks the response.
-  ctx.waitUntil(sendValidationPush(env, link.user_id, {
+  ctx.waitUntil(sendValidationPush(env, link.d1_database_id, {
     title: status === 'valid' ? '✅ Card validated'
          : status === 'used'   ? '⚠️ Card already used'
          :                       '❌ Invalid card code',
@@ -211,19 +235,21 @@ async function handleAdminValidations(request, env) {
 }
 
 async function handleAdminValidationDetail(request, env, id) {
-  await requireUser(request, env);
-  const row = await env.DB.prepare(
-    `SELECT v.* FROM card_validations v
-     JOIN share_links l ON l.id = v.link_id
-     WHERE v.id = ? AND l.user_id = ?`).bind(id, user.id).first();
+  const user = await requireUser(request, env);
+  const dbId = await getUserDbId(env, user.id);
+  if (!dbId) return err('Database not provisioned', 500);
+  const row = await queryUserDbFirst(env, dbId,
+    'SELECT * FROM card_validations WHERE id = ?', [id]);
   if (!row) return err('Not found', 404);
   return json(row);
 }
 
 async function handleAdminStats(request, env) {
-  await requireUser(request, env);
+  const user = await requireUser(request, env);
+  const dbId = await getUserDbId(env, user.id);
+  if (!dbId) return err('Database not provisioned', 500);
   const count = async (sql, ...b) =>
-    (await env.DB.prepare(sql).bind(...b).first())?.n || 0;
+    (await queryUserDbFirst(env, dbId, sql, b))?.n || 0;
   const [total, valid, used, invalid, codesTotal, codesUnused] = await Promise.all([
     count('SELECT COUNT(*) n FROM card_validations'),
     count("SELECT COUNT(*) n FROM card_validations WHERE status = 'valid'"),
@@ -236,22 +262,25 @@ async function handleAdminStats(request, env) {
 }
 
 async function handleAdminCodes(request, env) {
-  await requireUser(request, env);
-  const rows = await env.DB.prepare(
-    'SELECT id, code, is_used, used_at, created_at, notes FROM card_codes WHERE user_id = ? ORDER BY created_at DESC'
-  ).bind(user.id).all();
-  return json((rows.results || []).map(r => ({ ...r, is_used: !!r.is_used })));
+  const user = await requireUser(request, env);
+  const dbId = await getUserDbId(env, user.id);
+  if (!dbId) return err('Database not provisioned', 500);
+  const rows = await queryUserDb(env, dbId,
+    'SELECT id, code, is_used, used_at, created_at FROM card_codes ORDER BY created_at DESC');
+  return json(rows.map(r => ({ ...r, is_used: !!r.is_used })));
 }
 
 async function handleAdminAddCode(request, env) {
-  await requireUser(request, env);
-  const { code = '', notes = '' } = await readBody(request);
+  const user = await requireUser(request, env);
+  const dbId = await getUserDbId(env, user.id);
+  if (!dbId) return err('Database not provisioned', 500);
+  const { code = '' } = await readBody(request);
   const clean = code.trim().toUpperCase();
   if (!clean) return err('Enter a code');
   try {
-    await env.DB.prepare(
-      'INSERT INTO card_codes (id, user_id, code, notes, created_at) VALUES (?, ?, ?, ?, ?)'
-    ).bind(newId(), user.id, clean, notes.trim().slice(0, 200) || null, nowIso()).run();
+    await execUserDb(env, dbId,
+      'INSERT INTO card_codes (id, code, created_at) VALUES (?, ?, ?)',
+      [newId(), clean, nowIso()]);
   } catch {
     return err('You already have that code', 409);
   }
@@ -259,20 +288,24 @@ async function handleAdminAddCode(request, env) {
 }
 
 async function handleAdminDeleteCode(request, env, id) {
-  await requireUser(request, env);
-  await env.DB.prepare('DELETE FROM card_codes WHERE id = ? AND user_id = ?').bind(id, user.id).run();
+  const user = await requireUser(request, env);
+  const dbId = await getUserDbId(env, user.id);
+  if (!dbId) return err('Database not provisioned', 500);
+  await execUserDb(env, dbId, 'DELETE FROM card_codes WHERE id = ?', [id]);
   return json({ ok: true });
 }
 
 async function handleAdminPushToken(request, env) {
   const user = await requireUser(request, env);
+  const dbId = await getUserDbId(env, user.id);
+  if (!dbId) return err('Database not provisioned', 500);
   const { token = '', platform = '' } = await readBody(request);
   if (!token) return err('Missing device token');
-  await env.DB.prepare(
-    `INSERT INTO push_tokens (token, user_id, platform, created_at)
+  await execUserDb(env, dbId,
+    `INSERT INTO push_tokens (id, token, platform, created_at)
      VALUES (?, ?, ?, ?)
-     ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id`
-  ).bind(token.trim(), user.id, platform.slice(0, 20) || null, nowIso()).run();
+     ON CONFLICT(token) DO UPDATE SET platform = excluded.platform`,
+    [newId(), token.trim(), platform.slice(0, 20) || null, nowIso()]);
   return json({ ok: true });
 }
 

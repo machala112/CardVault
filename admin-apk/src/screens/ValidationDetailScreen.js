@@ -8,13 +8,14 @@ import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { format } from 'date-fns';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../theme';
 
 const STATUS_CONFIG = {
-  valid:   { emoji: '✅', color: colors.success, label: 'Valid' },
-  used:    { emoji: '⚠️', color: colors.warn,    label: 'Already Used' },
-  invalid: { emoji: '❌', color: colors.danger,  label: 'Invalid' },
-  pending: { emoji: '⏳', color: colors.text3,   label: 'Pending' },
+  valid:   { icon: 'checkmark-circle', color: colors.success, label: 'Valid' },
+  used:    { icon: 'time',             color: colors.warn,    label: 'Already Used' },
+  invalid: { icon: 'close-circle',     color: colors.danger,  label: 'Invalid' },
+  pending: { icon: 'hourglass-outline', color: colors.text3,   label: 'Pending' },
 };
 
 export default function ValidationDetailScreen({ route, navigation }) {
@@ -57,7 +58,7 @@ export default function ValidationDetailScreen({ route, navigation }) {
     >
       {/* Status banner */}
       <View style={[styles.banner, { borderColor: cfg.color + '44', backgroundColor: cfg.color + '15' }]}>
-        <Text style={styles.bannerEmoji}>{cfg.emoji}</Text>
+        <Ionicons name={cfg.icon} size={52} color={cfg.color} />
         <Text style={[styles.bannerLabel, { color: cfg.color }]}>{cfg.label}</Text>
       </View>
 
@@ -86,7 +87,7 @@ export default function ValidationDetailScreen({ route, navigation }) {
               {/* Download button beside the preview */}
               <View style={styles.imageActions}>
                 <TouchableOpacity style={styles.downloadBtn} onPress={downloadImage}>
-                  <Text style={styles.downloadIcon}>⬇</Text>
+                  <Ionicons name="download-outline" size={20} color={colors.text1} />
                   <Text style={styles.downloadText}>Save to{'\n'}Phone</Text>
                 </TouchableOpacity>
               </View>
@@ -95,14 +96,20 @@ export default function ValidationDetailScreen({ route, navigation }) {
         </View>
       ) : (
         <View style={styles.noImageCard}>
-          <Text style={styles.noImageText}>🖼 No image uploaded</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="image-outline" size={18} color={colors.text3} />
+                    <Text style={styles.noImageText}>No image uploaded</Text>
+                  </View>
         </View>
       )}
 
       {/* Actions */}
       <View style={styles.actions}>
         <TouchableOpacity style={styles.btn} onPress={shareValidation}>
-          <Text style={styles.btnText}>📤 Share Result</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="share-outline" size={18} color={colors.text1} />
+                    <Text style={styles.btnText}>Share Result</Text>
+                  </View>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.btn, styles.btnBack]} onPress={() => navigation.goBack()}>
           <Text style={styles.btnText}>← Back</Text>

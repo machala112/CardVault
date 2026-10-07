@@ -7,6 +7,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchValidations } from '../services/api';
 import ValidationRow from '../components/ValidationRow';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../theme';
 
 const FILTERS = ['all', 'valid', 'used', 'invalid'];
@@ -36,7 +37,7 @@ export default function AllValidationsScreen({ navigation }) {
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* Search */}
       <View style={styles.searchWrap}>
-        <Text style={styles.searchIcon}>🔍</Text>
+        <Ionicons name="search-outline" size={18} color={colors.text3} style={{ marginRight: 8 }} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search by code…"
@@ -74,7 +75,7 @@ export default function AllValidationsScreen({ navigation }) {
         refreshControl={<RefreshControl refreshing={refresh} onRefresh={load} tintColor={colors.accent} />}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={{ fontSize: 32 }}>📭</Text>
+            <Ionicons name="inbox-outline" size={48} color={colors.text3} />
             <Text style={styles.emptyText}>No validations found</Text>
           </View>
         }
@@ -86,7 +87,6 @@ export default function AllValidationsScreen({ navigation }) {
 const styles = StyleSheet.create({
   root:           { flex: 1, backgroundColor: colors.bg },
   searchWrap:     { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.glass, margin: 16, borderRadius: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.glassBorder },
-  searchIcon:     { fontSize: 16, marginRight: 8 },
   searchInput:    { flex: 1, height: 44, color: colors.text1, fontFamily: typography.body, fontSize: 14 },
   filterRow:      { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 8 },
   pill:           { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999, backgroundColor: colors.glass, borderWidth: 1, borderColor: colors.glassBorder },

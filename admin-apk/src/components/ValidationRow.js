@@ -1,14 +1,15 @@
-// src/components/ValidationRow.js
+// src/components/ValidationRow.js — Premium validation row with vector icons
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { formatDistanceToNow } from 'date-fns';
-import { colors, typography } from '../theme';
+import { colors, typography, borderRadius } from '../theme';
 
 const STATUS = {
-  valid:   { emoji: '✅', color: colors.success },
-  used:    { emoji: '⚠️', color: colors.warn },
-  invalid: { emoji: '❌', color: colors.danger },
-  pending: { emoji: '⏳', color: colors.text3 },
+  valid:   { icon: 'checkmark-circle', color: colors.success },
+  used:    { icon: 'time',             color: colors.warn },
+  invalid: { icon: 'close-circle',     color: colors.danger },
+  pending: { icon: 'hourglass-outline', color: colors.text3 },
 };
 
 export default function ValidationRow({ validation: v, onPress }) {
@@ -17,48 +18,80 @@ export default function ValidationRow({ validation: v, onPress }) {
 
   return (
     <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.7}>
-      <View style={[styles.statusBadge, { backgroundColor: s.color + '20' }]}>
-        <Text style={styles.statusEmoji}>{s.emoji}</Text>
+      <View style={[styles.statusBadge, { backgroundColor: s.color + '18' }]}>
+        <Ionicons name={s.icon} size={22} color={s.color} />
       </View>
       <View style={styles.info}>
         <Text style={styles.code} numberOfLines={1}>{v.card_code}</Text>
-        <Text style={styles.meta}>{v.status.toUpperCase()} · {ago}</Text>
+        <View style={styles.metaRow}>
+          <View style={[styles.statusPill, { backgroundColor: s.color + '20' }]}>
+            <Text style={[styles.statusText, { color: s.color }]}>
+              {v.status.toUpperCase()}
+            </Text>
+          </View>
+          <Text style={styles.ago}>{ago}</Text>
+        </View>
       </View>
-      {v.image_url && (
-        <Image
-          source={{ uri: v.image_url }}
-          style={styles.thumb}
-          resizeMode="cover"
-        />
-      )}
-      <Text style={styles.arrow}>›</Text>
+      {v.image_url ? (
+        <Image source={{ uri: v.image_url }} style={styles.thumb} resizeMode="cover" />
+      ) : null}
+      <Ionicons name="chevron-forward" size={20} color={colors.text3} />
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   row: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    gap:             12,
-    backgroundColor: colors.glass,
-    borderRadius:    14,
-    borderWidth:     1,
-    borderColor:     colors.glassBorder,
-    padding:         14,
-    marginBottom:    10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bgCard,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
+    padding: 14,
+    marginBottom: 10,
   },
   statusBadge: {
-    width:         40,
-    height:        40,
-    borderRadius:  12,
-    alignItems:    'center',
-    justifyContent:'center',
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
-  statusEmoji: { fontSize: 18 },
-  info:        { flex: 1 },
-  code:        { color: colors.text1, fontFamily: 'monospace', fontSize: 14, fontWeight: '600', letterSpacing: 0.5 },
-  meta:        { color: colors.text3, fontSize: 11, marginTop: 3, fontFamily: typography.body },
-  thumb:       { width: 40, height: 40, borderRadius: 8 },
-  arrow:       { color: colors.text3, fontSize: 20 },
+  info: { flex: 1 },
+  code: {
+    color: colors.text1,
+    fontFamily: 'monospace',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    gap: 8,
+  },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  ago: {
+    color: colors.text3,
+    fontSize: 11,
+    fontFamily: typography.body,
+  },
+  thumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    marginRight: 8,
+  },
 });

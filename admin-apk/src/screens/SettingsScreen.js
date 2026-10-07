@@ -13,13 +13,14 @@ import {
   sendNotification,
 } from '../services/notifications';
 import { signout } from '../services/api';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../theme';
 
 const SOUND_OPTIONS = [
-  { id: 'hardcore',  label: '🔥 Hardcore (Default)' },
-  { id: 'default',   label: '🔔 System Default' },
-  { id: 'alert',     label: '⚡ Alert Buzz' },
-  { id: 'chime',     label: '🎵 Chime' },
+  { id: 'hardcore',  label: 'Hardcore',       sub: 'Default',        icon: 'flame-outline' },
+  { id: 'default',   label: 'System Default', sub: 'Device sound',   icon: 'notifications-outline' },
+  { id: 'alert',     label: 'Alert Buzz',     sub: 'High energy',    icon: 'zap-outline' },
+  { id: 'chime',     label: 'Chime',          sub: 'Gentle tone',    icon: 'musical-notes-outline' },
 ];
 
 export default function SettingsScreen({ onSignOut }) {
@@ -133,7 +134,15 @@ export default function SettingsScreen({ onSignOut }) {
             style={styles.soundOption}
             onPress={() => update('customSound', opt.id)}
           >
-            <Text style={styles.soundLabel}>{opt.label}</Text>
+            <View style={styles.soundInfo}>
+              <View style={styles.soundIcon}>
+                <Ionicons name={opt.icon} size={20} color={colors.accent} />
+              </View>
+              <View>
+                <Text style={styles.soundLabel}>{opt.label}</Text>
+                <Text style={styles.soundSub}>{opt.sub}</Text>
+              </View>
+            </View>
             <View style={[styles.radio, settings.customSound === opt.id && styles.radioSelected]}>
               {settings.customSound === opt.id && <View style={styles.radioDot} />}
             </View>
@@ -153,10 +162,16 @@ export default function SettingsScreen({ onSignOut }) {
       <SectionLabel label="Actions" />
       <View style={styles.card}>
         <TouchableOpacity style={styles.btn} onPress={testNotif}>
-          <Text style={styles.btnText}>🔔 Send Test Notification</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="notifications-outline" size={18} color={colors.text1} />
+              <Text style={styles.btnText}>Send Test Notification</Text>
+            </View>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.btn, { marginTop: 10 }]} onPress={resetSettings}>
-          <Text style={[styles.btnText, { color: colors.text3 }]}>↺ Reset to Defaults</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="refresh-outline" size={18} color={colors.text3} />
+              <Text style={[styles.btnText, { color: colors.text3 }]}>Reset to Defaults</Text>
+            </View>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.btn, styles.btnDanger, { marginTop: 10 }]}
@@ -165,7 +180,10 @@ export default function SettingsScreen({ onSignOut }) {
         >
           {saving
             ? <ActivityIndicator color={colors.danger} size="small" />
-            : <Text style={[styles.btnText, { color: colors.danger }]}>🚪 Sign Out</Text>}
+            : <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="log-out-outline" size={18} color={colors.danger} />
+              <Text style={[styles.btnText, { color: colors.danger }]}>Sign Out</Text>
+            </View>}
         </TouchableOpacity>
       </View>
 
@@ -206,7 +224,10 @@ const styles = StyleSheet.create({
   settingLabel:{ color: colors.text1, fontSize: 15, fontFamily: typography.body },
   settingDesc: { color: colors.text3, fontSize: 12, marginTop: 2, fontFamily: typography.body },
   soundOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
-  soundLabel:  { color: colors.text1, fontSize: 14, fontFamily: typography.body },
+  soundInfo:   { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  soundIcon:   { width: 38, height: 38, borderRadius: 10, backgroundColor: colors.accent + '18', alignItems: 'center', justifyContent: 'center' },
+  soundLabel:  { color: colors.text1, fontSize: 14, fontWeight: '600', fontFamily: typography.body },
+  soundSub:    { color: colors.text3, fontSize: 12, fontFamily: typography.body, marginTop: 2 },
   radio:       { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: colors.text3, alignItems: 'center', justifyContent: 'center' },
   radioSelected:{ borderColor: colors.accent },
   radioDot:    { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },

@@ -2,6 +2,8 @@
 // The service-account JSON is stored as the FCM_SERVICE_ACCOUNT_JSON secret.
 // We mint a short-lived OAuth2 access token with RS256 (WebCrypto) and cache it.
 
+import { queryUserDb } from './userdb.js';
+
 const enc = new TextEncoder();
 let cached = null; // { accessToken, projectId, expiresAt }
 
@@ -61,11 +63,11 @@ async function getCredentials(env) {
 
 // Sends a push to a specific user's registered devices. Never throws —
 // a notification failure must not break the validation response.
-export async function sendValidationPush(env, userId, { title, body }) {
+export async function sendValidationPush(env, dbId, { title, body }) {
   try {
     const { accessToken, projectId } = await getCredentials(env);
-    const rows = await env.DB.prepare('SELECT token FROM push_tokens WHERE user_id = ?').bind(userId).all();
-    const tokens = (rows.results || []).map(r => r.token);
+    const rows = await queryUserDb(env, dbId, 'SELECT token FROM push_tokens');
+    const tokens = rows.map(r => r.token);
     await Promise.all(tokens.map(async (token) => {
       try {
         const res = await fetch(

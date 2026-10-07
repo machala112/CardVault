@@ -17,12 +17,14 @@ import AuthScreen             from './src/screens/AuthScreen';
 
 import { ready, auth } from './src/services/firebase';
 import { syncUser } from './src/services/api';
+import { setShareLink } from './src/services/linkStore';
 import {
   setupNotificationChannel,
   requestPermissions,
   registerForPushNotifications,
   addPushListener,
 } from './src/services/notifications';
+import { Ionicons } from '@expo/vector-icons';
 import { colors } from './src/theme';
 
 const Tab   = createBottomTabNavigator();
@@ -40,17 +42,20 @@ const NAV_THEME = {
   },
 };
 
-function TabIcon({ emoji, focused }) {
+function TabIcon({ name, focused }) {
   return (
     <View style={[tabIconStyles.wrap, focused && tabIconStyles.wrapActive]}>
-      <Text style={tabIconStyles.icon}>{emoji}</Text>
+      <Ionicons
+        name={name}
+        size={22}
+        color={focused ? colors.accent : colors.text3}
+      />
     </View>
   );
 }
 const tabIconStyles = StyleSheet.create({
   wrap:       { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   wrapActive: { backgroundColor: 'rgba(124,109,250,0.2)' },
-  icon:       { fontSize: 18 },
 });
 
 function MainTabs({ onSignOut }) {
@@ -71,17 +76,16 @@ function MainTabs({ onSignOut }) {
         tabBarLabelStyle:        { fontSize: 11, marginTop: 2 },
       }}
     >
-      <Tab.Screen
-        name="Dashboard"
+      <Tab.Screen name="Dashboard"
         component={DashboardScreen}
-        options={{ tabBarIcon: ({ focused }) => <TabIcon emoji="📊" focused={focused} /> }}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon name="grid-outline" focused={focused} /> }}
       />
       <Tab.Screen
         name="AllValidations"
         component={AllValidationsScreen}
-        options={{ title: 'Validations', tabBarIcon: ({ focused }) => <TabIcon emoji="📋" focused={focused} /> }}
+        options={{ title: 'Validations', tabBarIcon: ({ focused }) => <TabIcon name="receipt-outline" focused={focused} /> }}
       />
-      <Tab.Screen name="Settings" options={{ tabBarIcon: ({ focused }) => <TabIcon emoji="⚙️" focused={focused} /> }}>
+      <Tab.Screen name="Settings" options={{ tabBarIcon: ({ focused }) => <TabIcon name="settings-outline" focused={focused} /> }}>
         {() => <SettingsScreen onSignOut={onSignOut} />}
       </Tab.Screen>
     </Tab.Navigator>
@@ -128,7 +132,8 @@ export default function App() {
           if (cancelled) return;
           if (fbUser) {
             try {
-              const { user } = await syncUser(); // POST /api/auth/sync
+              const { user, link } = await syncUser(); // POST /api/auth/sync
+              if (link) setShareLink(link);
               if (cancelled) return;
               setAuthState('authed');
               await initPushFor(user && user.id ? user.id : fbUser.uid);
@@ -152,7 +157,8 @@ export default function App() {
     };
   }, [initPushFor]);
 
-  const handleAuth = useCallback(async (user) => {
+  const handleAuth = useCallback(async (user, link) => {
+    if (link) setShareLink(link);
     setAuthState('authed');
     await initPushFor(user && user.id ? user.id : null);
   }, [initPushFor]);

@@ -25,6 +25,11 @@ binding = "DB"
 database_name = "cardvault-db"
 database_id = "d3f20640-6895-4064-bdfa-d74258648ad8"
 
+[vars]
+CF_ACCOUNT_ID = "532d2d352abd91af5ed5ef0cbd8a9aea"
+# CF_API_TOKEN must be set as a secret: wrangler secret put CF_API_TOKEN
+# (needs D1:Edit permissions to create per-user databases)
+
 # R2 bucket for card images. OPTIONAL: if R2 is not enabled on the account,
 # leave this commented out — the Worker runs without image uploads.
 # To enable later: enable R2 in the Cloudflare dashboard, create the bucket,

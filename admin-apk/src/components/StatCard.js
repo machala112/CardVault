@@ -1,37 +1,85 @@
-// src/components/StatCard.js
+// src/components/StatCard.js — Premium stat card with vector icon
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { colors, typography } from '../theme';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { colors, typography, shadows, borderRadius } from '../theme';
 
-export default function StatCard({ label, value, color, icon }) {
+const ICONS = {
+  total:   'analytics-outline',
+  valid:   'checkmark-circle-outline',
+  used:    'time-outline',
+  invalid: 'close-circle-outline',
+};
+
+export default function StatCard({ label, value, color, iconKey, index = 0 }) {
+  const iconName = ICONS[iconKey] || 'stats-chart-outline';
+
   return (
-    <View style={[styles.card, { borderColor: color + '33' }]}>
-      <View style={[styles.iconWrap, { backgroundColor: color + '20' }]}>
-        <Text style={styles.icon}>{icon}</Text>
-      </View>
-      <Text style={[styles.value, { color }]}>{value.toLocaleString()}</Text>
-      <Text style={styles.label}>{label}</Text>
-    </View>
+    <Animated.View
+      entering={FadeInDown.delay(index * 80).springify()}
+      style={[styles.wrapper, shadows.card]}
+    >
+      <LinearGradient
+        colors={[color + '26', color + '0D']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.card, { borderColor: color + '40' }]}
+      >
+        <View style={[styles.iconWrap, { backgroundColor: color + '30' }]}>
+          <Ionicons name={iconName} size={22} color={color} />
+        </View>
+        <Text style={styles.value}>{value.toLocaleString()}</Text>
+        <Text style={styles.label}>{label}</Text>
+        <View style={[styles.accentBar, { backgroundColor: color }]} />
+      </LinearGradient>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper: {
+    borderRadius: borderRadius.lg,
+  },
   card: {
-    width:           130,
-    backgroundColor: colors.glass,
-    borderRadius:    16,
-    borderWidth:     1,
-    padding:         16,
-    gap:             8,
+    width: 138,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    padding: 16,
+    overflow: 'hidden',
   },
   iconWrap: {
-    width:        38,
-    height:       38,
-    borderRadius: 10,
-    alignItems:   'center',
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 12,
   },
-  icon:  { fontSize: 18 },
-  value: { fontSize: 28, fontWeight: '700', fontFamily: typography.display },
-  label: { color: colors.text3, fontSize: 12, fontFamily: typography.body },
+  value: {
+    fontSize: 30,
+    fontWeight: '800',
+    color: colors.text1,
+    fontFamily: typography.display,
+    letterSpacing: -0.5,
+  },
+  label: {
+    color: colors.text2,
+    fontSize: 12,
+    fontWeight: '500',
+    fontFamily: typography.body,
+    marginTop: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  accentBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    borderTopLeftRadius: borderRadius.lg,
+    borderBottomLeftRadius: borderRadius.lg,
+  },
 });
