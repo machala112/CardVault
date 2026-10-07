@@ -6,7 +6,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
 import { Share, Alert } from 'react-native';
 import { LinearGradient } from 'react-native-linear-gradient';
 import Animated, {
@@ -77,10 +76,10 @@ export default function DashboardScreen({ navigation }) {
     return onShareLinkChange(() => setShareUrl(getShareUrl()));
   }, []);
 
-  const copyLink = async () => {
+  const copyLink = () => {
     if (!shareUrl) return;
-    await Clipboard.setStringAsync(shareUrl);
-    Alert.alert('Copied', 'Your share link has been copied.');
+    // Link text is selectable — user can long-press to copy
+    Alert.alert('Your Link', shareUrl);
   };
 
   const shareLink = async () => {
@@ -166,7 +165,7 @@ export default function DashboardScreen({ navigation }) {
             <Ionicons name="link-outline" size={22} color="#fff" />
             <Text style={styles.linkTitle}>Your Share Link</Text>
           </View>
-          <Text style={styles.linkUrl} numberOfLines={1}>{shareUrl || 'Loading…'}</Text>
+          <Text style={styles.linkUrl} selectable={true}>{shareUrl || 'Loading…'}</Text>
           <View style={styles.linkActions}>
             <TouchableOpacity style={styles.linkBtn} onPress={copyLink}>
               <Ionicons name="copy-outline" size={16} color="#fff" />
