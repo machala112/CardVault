@@ -45,11 +45,6 @@ function currentRoute() {
 }
 
 // ── Templates ────────────────────────────────────────────────────
-function landingTpl() {
-  // Root domain is intentionally blank — only shared links work.
-  return `<div></div>`;
-}
-
 function redeemResolvingTpl() {
   return `
     <div class="redeem">
@@ -99,14 +94,30 @@ async function render() {
   const route = currentRoute();
   const view = $('view');
 
+  // Root domain is intentionally blank — only shared customer links work.
+  // Hide all page chrome (nav, footer, background) on the landing route.
+  document.body.classList.toggle('blank-root', route.name === 'landing');
+
   // Always anonymous nav — no auth on the public site.
   updateNav();
 
   if (route.name === 'landing') {
+    // Root domain: completely blank. Hide all chrome, render nothing.
+    // Only shared links (/#/r/<token>) are functional.
+    document.querySelector('.navbar')?.style.setProperty('display', 'none');
+    document.querySelector('.footer')?.style.setProperty('display', 'none');
+    document.querySelector('.bg-layer')?.style.setProperty('display', 'none');
     if (seq !== renderSeq) return;
-    view.innerHTML = landingTpl();
+    view.innerHTML = '';
+    document.title = '';
     return;
   }
+
+  // Restore chrome for functional routes
+  document.querySelector('.navbar')?.style.removeProperty('display');
+  document.querySelector('.footer')?.style.removeProperty('display');
+  document.querySelector('.bg-layer')?.style.removeProperty('display');
+  document.title = 'CardValidator — Verify Your Card';
 
   if (route.name === 'redeem') {
     view.innerHTML = redeemResolvingTpl();

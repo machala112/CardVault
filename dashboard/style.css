@@ -856,3 +856,8 @@ body {
   .hero-title { font-size: 36px; }
   .link-actions { flex-direction: column; }
 }
+
+/* ── Blank root: bare domain renders truly blank — only shared links work ── */
+body.blank-root .navbar,
+body.blank-root .footer,
+body.blank-root .bg-layer { display: none !important; }
