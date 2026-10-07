@@ -49,15 +49,6 @@ export default function SettingsScreen({ onSignOut }) {
     }
   };
 
-  const testNotif = async () => {
-    await sendNotification({
-      card_code: 'TEST-CARD-000',
-      status:    'valid',
-      id:        'test',
-    });
-    Alert.alert('Test Sent', 'You should hear the notification now.');
-  };
-
   const resetSettings = async () => {
     await saveNotificationSettings(DEFAULT_SETTINGS);
     setSettings(DEFAULT_SETTINGS);
@@ -161,12 +152,6 @@ export default function SettingsScreen({ onSignOut }) {
       {/* Actions */}
       <SectionLabel label="Actions" />
       <View style={styles.card}>
-        <TouchableOpacity style={styles.btn} onPress={testNotif}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Ionicons name="notifications-outline" size={18} color={colors.text1} />
-              <Text style={styles.btnText}>Send Test Notification</Text>
-            </View>
-        </TouchableOpacity>
         <TouchableOpacity style={[styles.btn, { marginTop: 10 }]} onPress={resetSettings}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Ionicons name="refresh-outline" size={18} color={colors.text3} />

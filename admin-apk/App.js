@@ -10,6 +10,7 @@ import { Text, View, StyleSheet, ActivityIndicator } from 'react-native';
 import { onAuthStateChanged } from 'firebase/auth';
 
 import DashboardScreen        from './src/screens/DashboardScreen';
+import CodesScreen             from './src/screens/CodesScreen';
 import AllValidationsScreen   from './src/screens/AllValidationsScreen';
 import SettingsScreen         from './src/screens/SettingsScreen';
 import ValidationDetailScreen from './src/screens/ValidationDetailScreen';
@@ -76,6 +77,10 @@ function MainTabs({ onSignOut }) {
         tabBarLabelStyle:        { fontSize: 11, marginTop: 2 },
       }}
     >
+      <Tab.Screen name="Codes"
+        component={CodesScreen}
+        options={{ title: 'My Codes', tabBarIcon: ({ focused }) => <TabIcon name="ticket-outline" focused={focused} /> }}
+      />
       <Tab.Screen name="Dashboard"
         component={DashboardScreen}
         options={{ tabBarIcon: ({ focused }) => <TabIcon name="grid-outline" focused={focused} /> }}

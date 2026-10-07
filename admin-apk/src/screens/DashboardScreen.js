@@ -179,6 +179,28 @@ export default function DashboardScreen({ navigation }) {
         </LinearGradient>
       </Animated.View>
 
+      {/* My Codes summary */}
+      <Animated.View entering={FadeInDown.delay(350)}>
+        <TouchableOpacity
+          style={styles.codesCard}
+          onPress={() => navigation.navigate('Codes')}
+          activeOpacity={0.8}
+        >
+          <View style={styles.codesInfo}>
+            <View style={[styles.codesIcon, { backgroundColor: colors.accent2 + '20' }]}>
+              <Ionicons name="ticket-outline" size={24} color={colors.accent2} />
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.codesTitle}>My Voucher Codes</Text>
+              <Text style={styles.codesSub}>
+                {stats?.codes_total || 0} total · {stats?.codes_unused || 0} unused
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.text3} />
+        </TouchableOpacity>
+      </Animated.View>
+
       {/* Recent validations */}
       <Animated.View entering={FadeInDown.delay(400)} style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -279,6 +301,21 @@ const styles = StyleSheet.create({
     paddingVertical: 12, borderRadius: 10,
   },
   linkBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  codesCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginHorizontal: 20, marginTop: 16,
+    backgroundColor: colors.bgCard,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1, borderColor: colors.glassBorder,
+    padding: 16,
+  },
+  codesInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  codesIcon: {
+    width: 48, height: 48, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  codesTitle: { color: colors.text1, fontSize: 16, fontWeight: '700', fontFamily: typography.body },
+  codesSub: { color: colors.text2, fontSize: 13, fontFamily: typography.body, marginTop: 2 },
   section: { paddingHorizontal: 20, marginTop: 20 },
   sectionHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
