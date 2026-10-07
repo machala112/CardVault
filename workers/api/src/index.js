@@ -221,7 +221,9 @@ async function handleImage(request, env, key) {
 // ── admin ──────────────────────────────────────────────────────
 
 async function handleAdminValidations(request, env) {
-  await requireUser(request, env);
+  const user = await requireUser(request, env);
+  const dbId = await getUserDbId(env, user.id);
+  if (!dbId) return err('Database not provisioned', 500);
   const params = new URL(request.url).searchParams;
   const limit = Math.min(Math.max(parseInt(params.get('limit') || '50', 10), 1), 200);
   const status = params.get('status');
@@ -230,8 +232,8 @@ async function handleAdminValidations(request, env) {
   if (status) { q += ' WHERE status = ?'; binds.push(status); }
   q += ' ORDER BY created_at DESC LIMIT ?';
   binds.push(limit);
-  const rows = await env.DB.prepare(q).bind(...binds).all();
-  return json(rows.results || []);
+  const rows = await queryUserDb(env, dbId, q, binds);
+  return json(rows);
 }
 
 async function handleAdminValidationDetail(request, env, id) {
