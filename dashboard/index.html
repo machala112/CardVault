@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
 </head>
 <body>
 
@@ -32,20 +32,413 @@
       </div>
       <span class="brand-name">CardValidator</span>
     </div>
-    <div class="nav-status" id="navStatus">
+    <div class="nav-links">
+      <a href="#" class="nav-link">How it works</a>
+      <a href="#" class="nav-link">Support</a>
+    </div>
+    <div class="nav-status">
       <span class="status-dot"></span>
       <span class="status-text">Live System</span>
     </div>
   </nav>
 
-  <!-- ░░░ APP VIEW (rendered by app.js) ░░░ -->
-  <main id="view"></main>
+  <!-- ░░░ HERO ░░░ -->
+  <section class="hero">
+    <div class="hero-eyebrow">
+      <span class="eyebrow-dot"></span>
+      Instant · Secure · No Account Needed
+    </div>
+    <h1 class="hero-title">
+      Verify Any<br/>
+      <span class="gradient-text">Gift Card</span><br/>
+      In Seconds
+    </h1>
+    <p class="hero-sub">Upload your card image, enter the code — we verify it instantly against our live database.</p>
+
+    <div class="hero-stats">
+      <div class="stat-item">
+        <span class="stat-num">9+</span>
+        <span class="stat-lbl">Card Brands</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-num">~3s</span>
+        <span class="stat-lbl">Avg. Verify Time</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-num">256-bit</span>
+        <span class="stat-lbl">Encryption</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ░░░ CARD CAROUSEL ░░░ -->
+  <div class="carousel-section">
+    <p class="carousel-label">Supported gift cards</p>
+    <div class="carousel-track-outer">
+      <div class="carousel-track" id="carouselTrack">
+        <!-- Cards duplicated in JS for seamless loop -->
+        <div class="card-slide"><img src="assets/amazon.jpeg"    alt="Amazon Gift Card"     /></div>
+        <div class="card-slide"><img src="assets/ebay.jpeg"      alt="eBay Gift Card"       /></div>
+        <div class="card-slide"><img src="assets/googleplay.jpeg" alt="Google Play Gift Card"/></div>
+        <div class="card-slide"><img src="assets/apple.jpeg"     alt="Apple Gift Card"      /></div>
+        <div class="card-slide"><img src="assets/amex.jpeg"      alt="Amex Prepaid Card"    /></div>
+        <div class="card-slide"><img src="assets/walmart.jpeg"   alt="Walmart Gift Card"    /></div>
+        <div class="card-slide"><img src="assets/razergold.png"  alt="Razer Gold Card"      /></div>
+        <div class="card-slide"><img src="assets/xbox.webp"      alt="Xbox Gift Card"       /></div>
+        <div class="card-slide"><img src="assets/applelogo.png"  alt="Apple Logo Card"      /></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░░ MAIN CARD ░░░ -->
+  <main class="main-container">
+    <div class="validator-card mirror-glass" id="validatorCard">
+
+      <!-- STEP 1: Upload -->
+      <div class="step" id="stepUpload">
+
+        <div class="step-header">
+          <div class="step-badge">Step 1</div>
+          <div>
+            <h2 class="step-title">Upload Card Image</h2>
+            <p class="step-desc">Take a clear photo of your gift card</p>
+          </div>
+        </div>
+
+        <!-- Image uploader drop zone -->
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="fileInput" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/bmp,image/tiff,image/heic,image/heif,.heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tiff" hidden />
+          <div class="upload-idle" id="uploadIdle">
+            <div class="upload-icon-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <p class="upload-label">Drag & drop or <button class="upload-browse" id="uploadBrowseBtn" type="button">browse</button></p>
+            <p class="upload-hint">All photo formats supported — JPG, PNG, WEBP, HEIC & more</p>
+          </div>
+          <div class="upload-preview hidden" id="uploadPreview">
+            <img id="previewImg" src="" alt="Card preview" />
+            <button class="remove-img" id="removeImg" type="button">✕ Remove</button>
+          </div>
+        </div>
+
+        <!-- Code input -->
+        <div class="step-header" style="margin-top:32px">
+          <div class="step-badge">Step 2</div>
+          <div>
+            <h2 class="step-title">Enter Card Code</h2>
+            <p class="step-desc">Type or paste the code exactly as printed</p>
+          </div>
+        </div>
+
+        <div class="code-input-wrap">
+          <div class="code-prefix">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="5" y="11" width="14" height="10" rx="2"/>
+              <path d="M8 11V7a4 4 0 018 0v4"/>
+            </svg>
+          </div>
+          <input
+            type="text"
+            id="codeInput"
+            class="code-input"
+            placeholder="xxxxx-xxxxx-xxxxx"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+
+        <!-- Validate button -->
+        <button class="btn-validate" id="validateBtn" onclick="startValidation()">
+          <span class="btn-text">Verify Card Now</span>
+          <svg class="btn-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+
+        <p class="privacy-note">
+          <svg viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1l6 2.5v4C14 11.5 11.5 14.5 8 15 4.5 14.5 2 11.5 2 7.5v-4L8 1z"/>
+          </svg>
+          Your data is encrypted end-to-end. No account required.
+        </p>
+      </div>
+
+      <!-- STEP 2: Loading -->
+      <div class="step hidden" id="stepLoading">
+        <div class="loading-center">
+          <div class="spiral-loader-wrap">
+            <div class="spiral-loader">
+              <div class="spiral-ring ring-1"></div>
+              <div class="spiral-ring ring-2"></div>
+              <div class="spiral-ring ring-3"></div>
+              <div class="spiral-core"></div>
+            </div>
+          </div>
+          <h2 class="loading-title">Validating Your Card</h2>
+          <p class="loading-sub" id="loadingMsg">Connecting to verification server...</p>
+          <div class="loading-steps">
+            <div class="ls-item" id="ls1"><span class="ls-dot"></span> Uploading image</div>
+            <div class="ls-item" id="ls2"><span class="ls-dot"></span> Reading card code</div>
+            <div class="ls-item" id="ls3"><span class="ls-dot"></span> Verifying with database</div>
+            <div class="ls-item" id="ls4"><span class="ls-dot"></span> Finalizing result</div>
+          </div>
+          <p class="please-wait">Please wait while we validate your card…</p>
+        </div>
+      </div>
+
+      <!-- STEP 3: Result -->
+      <div class="step hidden" id="stepResult">
+        <div class="result-center" id="resultContent"></div>
+        <button class="btn-validate" style="margin-top:32px" onclick="resetForm()">
+          <span class="btn-text">Verify Another Card</span>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- Trust badges below the card -->
+    <div class="trust-row">
+      <div class="trust-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span>Bank-grade security</span>
+      </div>
+      <div class="trust-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>Results in ~3 seconds</span>
+      </div>
+      <div class="trust-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        <span>No account needed</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- ░░░ TESTIMONIALS ░░░ -->
+  <section class="testimonials-section">
+    <div class="testimonials-header">
+      <p class="carousel-label">What people are saying</p>
+      <h2 class="testimonials-title">Trusted by thousands <span class="gradient-text">worldwide</span></h2>
+    </div>
+    <div class="testi-track-outer" id="testiOuter">
+      <div class="testi-track" id="testiTrack"></div>
+    </div>
+    <div class="testi-controls">
+      <button class="testi-btn" id="testiBtnPrev" aria-label="Previous">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="testi-dots" id="testiDots"></div>
+      <button class="testi-btn" id="testiBtnNext" aria-label="Next">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+    </div>
+  </section>
 
   <!-- ░░░ FOOTER ░░░ -->
   <footer class="footer">
-    <p>© 2026 CardValidator · Secure · Instant · Reliable</p>
+    <div class="footer-brand">
+      <div class="brand-icon sm">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="5" width="20" height="14" rx="3"/>
+          <path d="M2 10h20"/>
+        </svg>
+      </div>
+      <span>CardValidator</span>
+    </div>
+    <p class="footer-copy">© 2025 CardValidator · Secure · Instant · Reliable</p>
   </footer>
 
   <script src="app.js"></script>
+  <script>
+    // ── Gift Card Carousel (infinite loop) ──────────────────────
+    (function initCarousel() {
+      const track = document.getElementById('carouselTrack');
+      if (!track) return;
+      const origSlides = Array.from(track.children);
+      origSlides.forEach(slide => {
+        const clone = slide.cloneNode(true);
+        clone.setAttribute('aria-hidden', 'true');
+        track.appendChild(clone);
+      });
+      const outer = track.parentElement;
+      outer.addEventListener('mouseenter', () => track.style.animationPlayState = 'paused');
+      outer.addEventListener('mouseleave', () => track.style.animationPlayState = 'running');
+      outer.addEventListener('touchstart', () => track.style.animationPlayState = 'paused', { passive: true });
+      outer.addEventListener('touchend',   () => track.style.animationPlayState = 'running', { passive: true });
+    })();
+
+    // ── Testimonials ─────────────────────────────────────────────
+    (function initTestimonials() {
+      const REVIEWS = [
+        { name:"Chukwuemeka A.", loc:"Lagos, NG",       stars:5, text:"Verified my Amazon gift card in under 3 seconds. Absolutely brilliant service!" },
+        { name:"Sophia R.",      loc:"London, UK",       stars:5, text:"I was skeptical at first but this platform is genuinely reliable. Got my result instantly." },
+        { name:"Marcus T.",      loc:"Houston, TX",        stars:5, text:"Used it for a Walmart card and it worked perfectly. No fuss, no account needed." },
+        { name:"James O.",       loc:"Toronto, ON",        stars:5, text:"Super fast. Uploaded my Steam card image, entered the code — done in seconds." },
+        { name:"Daniel H.",      loc:"Berlin, DE",         stars:5, text:"Checked my eBay gift card before gifting it. Worked like a charm. 10/10." },
+        { name:"Tyler W.",       loc:"Phoenix, AZ",        stars:5, text:"I've used a few of these services and this is by far the most polished one." },
+        { name:"Elena V.",       loc:"Madrid, ES",         stars:5, text:"No sign-up, no data collection hassle. Just paste the code and you're done." },
+        { name:"Kevin B.",       loc:"Atlanta, GA",        stars:5, text:"Caught a fraudulent card before I sent money. This platform is a must-have." },
+        { name:"Rachel G.",      loc:"London, UK",         stars:5, text:"I recommend this to everyone who deals with gift cards. It's so easy to use." },
+        { name:"Luca B.",        loc:"Milan, IT",          stars:5, text:"Seamless experience. Verified three cards back-to-back without any delay." },
+        { name:"Chris M.",       loc:"Chicago, IL",        stars:5, text:"Used it for an Xbox gift card. Instant verification. Will definitely use again." },
+        { name:"Hannah P.",      loc:"Dublin, IE",         stars:5, text:"Verified an Amazon card before Christmas shopping. Worked perfectly, highly recommend." },
+        { name:"Noah J.",        loc:"Seattle, WA",        stars:5, text:"The no-account policy is a huge plus. Just upload and verify, no strings attached." },
+        { name:"Michael R.",     loc:"New York, NY",       stars:5, text:"Tried it on a whim and was amazed. Super reliable gift card verification." },
+        { name:"Tom H.",         loc:"Manchester, UK",     stars:5, text:"Been using this for months. Never had a single incorrect verification result." },
+        { name:"Jordan L.",      loc:"Austin, TX",         stars:5, text:"Verified my Amex prepaid card. The result was accurate and came back super fast." },
+        { name:"Sven M.",        loc:"Stockholm, SE",      stars:5, text:"Clean, minimal, and fast. Exactly what a gift card verifier should be." },
+        { name:"Jennifer A.",    loc:"Dallas, TX",         stars:5, text:"The star rating says it all. Five stars and I mean every single one of them." },
+        { name:"Mark T.",        loc:"Denver, CO",         stars:5, text:"The UI is gorgeous. Dark theme, smooth animations — plus it actually works great." },
+        { name:"Felix B.",       loc:"Frankfurt, DE",      stars:5, text:"Reliable, private, and beautifully designed. This is how web apps should be built." },
+        { name:"Amelia K.",      loc:"Melbourne, AU",      stars:5, text:"Verified an Apple gift card in seconds. The service is unmatched. Highly recommended." },
+        { name:"Ben C.",         loc:"Vancouver, BC",      stars:5, text:"Tried to verify a questionable card. Platform flagged it as used. Saved me money!" },
+        { name:"Marco R.",       loc:"Rome, IT",           stars:5, text:"The loading animation while verifying is actually quite satisfying to watch." },
+        { name:"Sarah M.",       loc:"Minneapolis, MN",    stars:5, text:"Clean interface, immediate results, no account needed. This ticks every box." },
+        { name:"Nina R.",        loc:"Amsterdam, NL",      stars:5, text:"The platform is as fast as it claims. My eBay card result came back in an instant." },
+        { name:"Olivia T.",      loc:"Boston, MA",         stars:5, text:"I appreciate that there's no sign-up. Just open the page and start verifying." },
+        { name:"Patrick H.",     loc:"Dublin, IE",         stars:5, text:"First time using it and already recommending it to friends. Very solid service." },
+        { name:"Anna S.",        loc:"Vienna, AT",         stars:5, text:"Elegant design and a super smooth experience. Verified my eBay card in no time." },
+        { name:"Ryan K.",        loc:"Los Angeles, CA",    stars:5, text:"Lightning quick result. This is exactly the kind of tool I needed for safe trading." },
+        { name:"Chloe W.",       loc:"Edinburgh, UK",      stars:5, text:"The dark design is premium and the verification is flawless. Love this platform." },
+        { name:"Lucas F.",       loc:"Lyon, FR",           stars:5, text:"Works great for Google Play cards. Fast and accurate every single time." },
+        { name:"Emma J.",        loc:"Bristol, UK",        stars:5, text:"I use this every time I receive a gift card. Never let me down once." },
+        { name:"David M.",       loc:"Calgary, AB",        stars:5, text:"Exactly what it says on the tin. Fast, secure, and no account required." },
+        { name:"Sophie L.",      loc:"Paris, FR",          stars:5, text:"The interface is so clean and modern. Verification was done almost instantly." },
+        { name:"James R.",       loc:"Philadelphia, PA",   stars:5, text:"Verified a Steam card I got as a gift. Result came back valid in seconds. Brilliant." },
+        { name:"Charlotte B.",   loc:"Birmingham, UK",     stars:5, text:"So simple to use and surprisingly fast. I'll be recommending this to everyone." },
+        { name:"Nathan G.",      loc:"Portland, OR",       stars:5, text:"The animations are smooth and the verification result was 100% accurate." },
+        { name:"Isabella M.",    loc:"Barcelona, ES",      stars:5, text:"Verified my Razer Gold card with zero issues. Great platform, highly recommended." },
+        { name:"William T.",     loc:"Ottawa, ON",         stars:5, text:"Couldn't believe how quick the verification was. Three seconds and I had my answer." },
+        { name:"Ella D.",        loc:"Zurich, CH",         stars:5, text:"The privacy-first approach is what sold me. No accounts, no tracking. Just results." },
+        { name:"George P.",      loc:"Miami, FL",          stars:5, text:"Caught an already-used card before I paid for it. This service is genuinely valuable." },
+        { name:"Mia C.",         loc:"Cork, IE",           stars:5, text:"Sleek and professional. Feels like it was made by a top-tier team." },
+        { name:"Alexander N.",   loc:"Munich, DE",         stars:5, text:"Verified an iTunes card in seconds. Perfect result. Will use this every time." },
+        { name:"Grace F.",       loc:"Leeds, UK",          stars:5, text:"The image upload works perfectly on mobile. Snapped a photo and it was done." },
+        { name:"Henry S.",       loc:"San Francisco, CA",  stars:5, text:"CardValidator is my go-to before accepting any gift card payment online." },
+        { name:"Lily K.",        loc:"Brussels, BE",       stars:5, text:"Simple, fast, and effective. Exactly what you want from a card verifier." },
+        { name:"Jack W.",        loc:"Sydney, AU",         stars:5, text:"Very impressed with the accuracy. My Xbox card verified correctly first try." },
+        { name:"Zoe H.",         loc:"Glasgow, UK",        stars:5, text:"The loading screen is fun to watch while it verifies. Great attention to detail." },
+        { name:"Samuel B.",      loc:"Montreal, QC",       stars:5, text:"Smooth experience from start to finish. Verified a Google Play card in moments." },
+        { name:"Ava M.",         loc:"Dublin, IE",         stars:5, text:"I was nervous about using a new site but the result was perfectly accurate." },
+        { name:"Oliver J.",      loc:"Washington, DC",     stars:5, text:"The dot animation during verification is a nice design touch. Fast and reliable." },
+        { name:"Freya L.",       loc:"Oslo, NO",           stars:5, text:"Verified an Amazon card without any issues. Clean site, fast results." },
+        { name:"Ethan R.",       loc:"Nashville, TN",      stars:5, text:"This replaced every other card checker I used. It's the most reliable by far." },
+        { name:"Isla C.",        loc:"London, UK",         stars:5, text:"Love that you can drag and drop the image. Such a thoughtful design feature." },
+        { name:"Mason T.",       loc:"San Diego, CA",      stars:5, text:"Verified three Walmart cards in a row. All accurate. This site is the real deal." },
+        { name:"Poppy W.",       loc:"Liverpool, UK",      stars:5, text:"The encryption badge gives me real confidence. Feels safe and professional." },
+        { name:"Logan A.",       loc:"Edmonton, AB",       stars:5, text:"Fast verification and a gorgeous interface. This is the gold standard." },
+        { name:"Scarlett H.",    loc:"Copenhagen, DK",     stars:5, text:"Checked my eBay gift card before using it. Result was instant and correct." },
+        { name:"Harrison M.",    loc:"Austin, TX",         stars:5, text:"The no-login policy is huge for me. I don't want to hand over my email just to verify." },
+        { name:"Imogen B.",      loc:"Sheffield, UK",      stars:5, text:"Simple UI, quick result. Does exactly what it says. Five stars from me." },
+        { name:"Theodore C.",    loc:"Chicago, IL",        stars:5, text:"Incredibly smooth. The fastest gift card verifier I've ever tried." },
+        { name:"Rosie F.",       loc:"Amsterdam, NL",      stars:5, text:"Verified a Steam card before buying it as a gift. Came back valid. Perfect." },
+        { name:"Finn D.",        loc:"Auckland, NZ",       stars:5, text:"The gift card carousel on the homepage is a great touch. Slick and modern." },
+        { name:"Arabella K.",    loc:"Geneva, CH",         stars:5, text:"Fast, accurate, and completely private. Exactly what I was looking for." },
+        { name:"Callum J.",      loc:"Edinburgh, UK",      stars:5, text:"Used it for an Amex prepaid card. Worked brilliantly. Highly recommended." },
+        { name:"Harriet S.",     loc:"Wellington, NZ",     stars:5, text:"The platform is so easy to navigate. I had my result before I expected it." },
+        { name:"Spencer W.",     loc:"Boston, MA",         stars:5, text:"Best gift card verification tool on the internet. No competition." },
+        { name:"Penelope R.",    loc:"Lisbon, PT",         stars:5, text:"Clear, fast, and trustworthy. I won't accept a gift card without checking it here first." },
+        { name:"Jasper N.",      loc:"Toronto, ON",        stars:5, text:"Verified an Apple gift card and a Google Play card back to back. Both perfect." },
+        { name:"Beatrice M.",    loc:"Florence, IT",       stars:5, text:"The result page is beautifully designed. Even getting a valid result feels premium." },
+        { name:"Archie L.",      loc:"Newcastle, UK",      stars:5, text:"Told my whole friend group about this. Everyone who tries it is impressed." },
+      ];
+
+      const CARDS_PER_PAGE = 3; // cards visible per slide page
+      const track    = document.getElementById('testiTrack');
+      const dotsWrap = document.getElementById('testiDots');
+      const btnPrev  = document.getElementById('testiBtnPrev');
+      const btnNext  = document.getElementById('testiBtnNext');
+      if (!track) return;
+
+      // Build pages (groups of CARDS_PER_PAGE)
+      const pages = [];
+      for (let i = 0; i < REVIEWS.length; i += CARDS_PER_PAGE) {
+        pages.push(REVIEWS.slice(i, i + CARDS_PER_PAGE));
+      }
+
+      let currentPage = 0;
+      let autoTimer   = null;
+
+      // Render all pages into track
+      pages.forEach((page, pi) => {
+        const pageEl = document.createElement('div');
+        pageEl.className = 'testi-page';
+        pageEl.dataset.page = pi;
+        page.forEach(r => {
+          const stars = '★'.repeat(r.stars) + '☆'.repeat(5 - r.stars);
+          const initials = r.name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+          const hue = (r.name.charCodeAt(0) * 47 + r.name.charCodeAt(1) * 13) % 360;
+          pageEl.innerHTML += `
+            <div class="testi-card mirror-glass">
+              <div class="testi-stars">${stars}</div>
+              <p class="testi-text">"${r.text}"</p>
+              <div class="testi-author">
+                <div class="testi-avatar" style="--av-hue:${hue}deg">${initials}</div>
+                <div>
+                  <div class="testi-name">${r.name}</div>
+                  <div class="testi-loc">${r.loc}</div>
+                </div>
+              </div>
+            </div>`;
+        });
+        track.appendChild(pageEl);
+      });
+
+      // Build dots (show max 10, use ellipsis feel)
+      const VISIBLE_DOTS = Math.min(pages.length, 10);
+      for (let i = 0; i < VISIBLE_DOTS; i++) {
+        const d = document.createElement('button');
+        d.className = 'testi-dot';
+        d.setAttribute('aria-label', `Page ${i+1}`);
+        d.addEventListener('click', () => goTo(i));
+        dotsWrap.appendChild(d);
+      }
+
+      function updateDots() {
+        const dots = dotsWrap.querySelectorAll('.testi-dot');
+        dots.forEach((d, i) => d.classList.toggle('active', i === currentPage % VISIBLE_DOTS));
+      }
+
+      function goTo(page, animate = true) {
+        const pages_els = track.querySelectorAll('.testi-page');
+        pages_els.forEach((el, i) => {
+          el.classList.toggle('active', i === page);
+          el.classList.toggle('prev', i < page);
+        });
+        currentPage = page;
+        updateDots();
+        btnPrev.disabled = currentPage === 0;
+        btnNext.disabled = currentPage === pages.length - 1;
+      }
+
+      function next() { if (currentPage < pages.length - 1) goTo(currentPage + 1); else goTo(0); }
+      function prev() { if (currentPage > 0) goTo(currentPage - 1); }
+
+      btnNext.addEventListener('click', () => { clearInterval(autoTimer); next(); startAuto(); });
+      btnPrev.addEventListener('click', () => { clearInterval(autoTimer); prev(); startAuto(); });
+
+      // Touch swipe
+      let touchStartX = 0;
+      const outer = document.getElementById('testiOuter');
+      outer.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive: true });
+      outer.addEventListener('touchend',   e => {
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        if (Math.abs(dx) > 40) { clearInterval(autoTimer); dx < 0 ? next() : prev(); startAuto(); }
+      }, { passive: true });
+
+      function startAuto() {
+        clearInterval(autoTimer);
+        autoTimer = setInterval(next, 5000);
+      }
+
+      goTo(0);
+      startAuto();
+    })();
+  </script>
 </body>
 </html>

@@ -1,261 +1,269 @@
 /* ============================================================
-   CardValidator — Public validation site (no auth, no signup)
-   Customers use a business's share link to validate gift cards.
-   All account management happens in the admin mobile app.
+   CardValidator — Frontend Logic
+   Cloudflare Worker API · Share-link validation (#/r/<token>)
    ============================================================ */
 
-// ── Utils ──────────────────────────────────────────────────────
-const $       = id => document.getElementById(id);
-const sleep   = ms => new Promise(r => setTimeout(r, ms));
-const escHtml = s => String(s == null ? '' : s)
-  .replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
-// ── API client (same origin, JSON, no auth) ─────────────────────
+// ── API helper ────────────────────────────────────────────────
 async function api(path, { method = 'GET', body = null, form = null } = {}) {
-  const headers = {};
-  let payload = null;
+  const opts = { method, headers: {} };
   if (form) {
-    payload = form;
-  } else if (body != null) {
-    headers['Content-Type'] = 'application/json';
-    payload = JSON.stringify(body);
+    opts.body = form; // FormData — browser sets Content-Type
+  } else if (body) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
   }
-  let res;
-  try {
-    res = await fetch(path, { method, headers, body: payload });
-  } catch (e) {
-    throw new Error('Could not reach the server. Check your connection and try again.');
-  }
-  let data = null;
-  try { data = await res.json(); } catch (e) { /* non-JSON */ }
-  if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
-  return data || {};
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
 }
 
-// ── Router ───────────────────────────────────────────────────────
-function currentRoute() {
-  const h = location.hash || '#/';
-  if (h.startsWith('#/r/')) {
-    const token = decodeURIComponent(h.slice(4).split('?')[0]);
-    return token ? { name: 'redeem', token } : { name: 'landing' };
-  }
-  const m = location.pathname.match(/^\/r\/([^\/]+)\/?$/);
-  if (m) return { name: 'redeem', token: decodeURIComponent(m[1]) };
-  return { name: 'landing' };
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// ── Templates ────────────────────────────────────────────────────
-function redeemResolvingTpl() {
-  return `
-    <div class="redeem">
-      <div class="redeem-card">
-        <p class="please-wait">Loading…</p>
-      </div>
-    </div>`;
+// ── Route: #/r/<token> ────────────────────────────────────────
+function getRoute() {
+  const h = location.hash || '';
+  const m = h.match(/^#\/r\/([A-Za-z0-9_-]+)/);
+  if (m) return { name: 'redeem', token: m[1] };
+  return { name: 'landing' }; // root → blank
 }
 
-function invalidLinkTpl() {
-  return `
-    <div class="redeem">
-      <div class="redeem-card">
-        <div class="result-icon">❌</div>
-        <h2>Invalid Link</h2>
-        <p>This share link is not valid. Please check with the business that sent it.</p>
-      </div>
-    </div>`;
-}
+// ── State ─────────────────────────────────────────────────────
+let uploadedFile = null;
+let linkToken = null;
 
-function redeemTpl(ownerName, token) {
-  return `
-    <div class="redeem">
-      <p class="redeem-via">via ${escHtml(ownerName || 'CardValidator')}’s link</p>
-      <div class="redeem-card">
-        <h2>Validate Your Card</h2>
-        <p class="redeem-sub">Enter the code from your gift card or voucher.</p>
-        <input id="codeInput" class="code-input" placeholder="Enter card code" autocomplete="off" />
-        <label class="img-label">Card photo (optional)
-          <input id="imgInput" type="file" accept="image/*" class="img-input" />
-        </label>
-        <button class="btn-validate" id="validateBtn" type="button">Validate Card</button>
-        <div id="loadingArea" class="loading-area hidden">
-          <div class="steps" id="steps"></div>
-          <p class="please-wait" id="loadingMsg">Please wait…</p>
-        </div>
-        <div id="resultContent"></div>
-      </div>
-    </div>`;
-}
+// ── DOM refs ──────────────────────────────────────────────────
+const uploadZone    = document.getElementById('uploadZone');
+const fileInput     = document.getElementById('fileInput');
+const uploadIdle    = document.getElementById('uploadIdle');
+const uploadPreview = document.getElementById('uploadPreview');
+const previewImg    = document.getElementById('previewImg');
+const removeImg     = document.getElementById('removeImg');
+const codeInput     = document.getElementById('codeInput');
+const stepUpload    = document.getElementById('stepUpload');
+const stepLoading   = document.getElementById('stepLoading');
+const stepResult    = document.getElementById('stepResult');
+const resultContent = document.getElementById('resultContent');
+const loadingMsg    = document.getElementById('loadingMsg');
+const ls            = [null,'ls1','ls2','ls3','ls4'].map(id => id && document.getElementById(id));
 
-// ── Render ───────────────────────────────────────────────────────
-let renderSeq = 0;
+// ── Boot ──────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', init);
+window.addEventListener('hashchange', init);
 
-async function render() {
-  const seq = ++renderSeq;
-  const route = currentRoute();
-  const view = $('view');
-
-  // Root domain is intentionally blank — only shared customer links work.
-  // Hide all page chrome (nav, footer, background) on the landing route.
-  document.body.classList.toggle('blank-root', route.name === 'landing');
-
-  // Always anonymous nav — no auth on the public site.
-  updateNav();
+async function init() {
+  const route = getRoute();
 
   if (route.name === 'landing') {
-    // Root domain: completely blank. Hide all chrome, render nothing.
-    // Only shared links (/#/r/<token>) are functional.
-    document.querySelector('.navbar')?.style.setProperty('display', 'none');
-    document.querySelector('.footer')?.style.setProperty('display', 'none');
-    document.querySelector('.bg-layer')?.style.setProperty('display', 'none');
-    if (seq !== renderSeq) return;
-    view.innerHTML = '';
+    // Root: completely blank — only shared links work.
+    document.body.style.display = 'none';
     document.title = '';
     return;
   }
-
-  // Restore chrome for functional routes
-  document.querySelector('.navbar')?.style.removeProperty('display');
-  document.querySelector('.footer')?.style.removeProperty('display');
-  document.querySelector('.bg-layer')?.style.removeProperty('display');
+  document.body.style.display = '';
   document.title = 'CardValidator — Verify Your Card';
 
-  if (route.name === 'redeem') {
-    view.innerHTML = redeemResolvingTpl();
-    let res;
-    try {
-      res = await api('/api/links/resolve?token=' + encodeURIComponent(route.token));
-    } catch (e) {
-      res = { valid: false };
-    }
-    if (seq !== renderSeq) return;
-    if (!res || !res.valid) {
-      view.innerHTML = invalidLinkTpl();
-    } else {
-      view.innerHTML = redeemTpl(res.owner_name, route.token);
-      bindRedeem(route.token);
-    }
+  // Resolve the share link
+  linkToken = route.token;
+  let res;
+  try {
+    res = await api('/api/links/resolve?token=' + encodeURIComponent(linkToken));
+  } catch (e) {
+    res = { valid: false };
+  }
+  if (!res || !res.valid) {
+    showResult('error', '', 'This link is invalid or has expired.');
+    stepUpload.classList.add('hidden');
     return;
   }
+  // Show owner name if there's a spot for it
+  const ownerEl = document.getElementById('ownerName');
+  if (ownerEl && res.owner_name) ownerEl.textContent = res.owner_name;
 }
 
-function updateNav() {
-  const el = $('navStatus');
-  if (el) el.innerHTML = '<span class="status-dot"></span><span class="status-text">Live System</span>';
+// ── Upload zone setup ─────────────────────────────────────────
+
+// Browse button — direct trigger (most reliable on mobile)
+const uploadBrowseBtn = document.getElementById('uploadBrowseBtn');
+if (uploadBrowseBtn) {
+  uploadBrowseBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    fileInput.click();
+  });
 }
 
-// ── Validation flow ──────────────────────────────────────────────
-let uploadedFile = null;
+// Clicking anywhere in the zone (but not Remove) also opens picker
+uploadZone.addEventListener('click', e => {
+  if (removeImg && (e.target === removeImg || removeImg.contains(e.target))) return;
+  fileInput.click();
+});
 
-function bindRedeem(linkToken) {
-  const imgInput = $('imgInput');
-  if (imgInput) {
-    imgInput.addEventListener('change', () => {
-      uploadedFile = imgInput.files && imgInput.files[0] ? imgInput.files[0] : null;
-    });
-  }
-  $('validateBtn').addEventListener('click', () => startValidation(linkToken));
-  $('againBtn')?.addEventListener('click', () => render());
+uploadZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  uploadZone.classList.add('drag-over');
+});
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) setFile(f);
+});
+
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files && fileInput.files[0];
+  if (f) setFile(f);
+});
+
+removeImg.addEventListener('click', e => {
+  e.stopPropagation();
+  clearFile();
+});
+
+function setFile(file) {
+  uploadedFile = file;
+  const url = URL.createObjectURL(file);
+  previewImg.src = url;
+  uploadIdle.classList.add('hidden');
+  uploadPreview.classList.remove('hidden');
 }
 
-function setStep(n, cls) {
-  const steps = $('steps');
-  if (!steps) return;
-  // Simple step indicator
-  steps.innerHTML = ['Upload', 'Read', 'Check', 'Done'].map((s, i) =>
-    `<div class="step ${i < n ? 'done' : ''} ${i === n ? 'active' : ''}">${s}</div>`
-  ).join('');
+function clearFile() {
+  uploadedFile = null;
+  fileInput.value = '';
+  uploadIdle.classList.remove('hidden');
+  uploadPreview.classList.add('hidden');
 }
 
-async function startValidation(linkToken) {
-  const code = ($('codeInput').value || '').trim();
+// ── Validation ────────────────────────────────────────────────
+async function startValidation() {
+  const code = codeInput.value.trim();
   if (!code) {
-    showResult('invalid', '', 'Please enter a card code.');
+    shakeInput();
     return;
   }
-  $('loadingArea').classList.remove('hidden');
-  $('resultContent').innerHTML = '';
+  if (!linkToken) {
+    showResult('error', code, 'Invalid share link.');
+    return;
+  }
+
+  // Switch to loading step
+  stepUpload.classList.add('hidden');
+  stepLoading.classList.remove('hidden');
+  stepResult.classList.add('hidden');
+
+  // Animate loading steps
+  const steps = [
+    { el: ls[1], msg: 'Uploading card image…',         delay: 0    },
+    { el: ls[2], msg: 'Reading card code…',             delay: 900  },
+    { el: ls[3], msg: 'Checking database…',             delay: 1800 },
+    { el: ls[4], msg: 'Finalizing result…',             delay: 2700 },
+  ];
+
+  for (const s of steps) {
+    setTimeout(() => {
+      steps.filter(x => x.el !== s.el).forEach(x => {
+        if (x.el) x.el.classList.remove('active');
+      });
+      if (s.el) s.el.classList.add('active');
+      loadingMsg.textContent = s.msg;
+    }, s.delay);
+  }
 
   try {
-    // 1. Upload image first (only if one was chosen)
+    // 1. Upload image (or skip if none)
     let imageUrl = null;
-    setStep(1, 'active');
-    $('loadingMsg').textContent = uploadedFile ? 'Uploading card image…' : 'Skipping image upload…';
     if (uploadedFile) {
       try {
         const fd = new FormData();
         fd.append('image', uploadedFile);
         fd.append('link_token', linkToken);
         const up = await api('/api/upload', { method: 'POST', form: fd });
-        imageUrl = up.image_url;
+        imageUrl = up.image_url || null;
       } catch (uploadErr) {
         console.warn('Image upload skipped:', uploadErr.message);
-        imageUrl = null;
       }
     }
-    await sleep(400);
-    setStep(1, 'done');
+    if (ls[1]) { ls[1].classList.remove('active'); ls[1].classList.add('done'); }
 
-    // 2-3. Validate the code
-    setStep(2, 'active');
-    $('loadingMsg').textContent = 'Reading card code…';
-    await sleep(500);
-    setStep(2, 'done');
-    setStep(3, 'active');
-    $('loadingMsg').textContent = 'Checking database…';
+    // 2. Validate via Cloudflare API
     const body = { code, link_token: linkToken };
     if (imageUrl) body.image_url = imageUrl;
     const result = await api('/api/validate', { method: 'POST', body });
-    setStep(3, 'done');
+    if (ls[2]) { ls[2].classList.remove('active'); ls[2].classList.add('done'); }
+    if (ls[3]) { ls[3].classList.remove('active'); ls[3].classList.add('done'); }
 
-    // 4. Finalize
-    setStep(4, 'active');
-    $('loadingMsg').textContent = 'Finalizing result…';
-    await sleep(500);
-    setStep(4, 'done');
-    await sleep(300);
-    $('loadingArea').classList.add('hidden');
+    await sleep(600);
+    if (ls[4]) { ls[4].classList.remove('active'); ls[4].classList.add('done'); }
+
+    await sleep(400);
     showResult(result.status, result.code || code);
+
   } catch (err) {
     console.error(err);
-    $('loadingArea').classList.add('hidden');
     showResult('error', code, err.message);
   }
 }
 
 function showResult(status, code, errMsg) {
+  stepLoading.classList.add('hidden');
+  stepResult.classList.remove('hidden');
+
   const configs = {
     valid: {
-      icon: '✅', cls: 'valid',
+      icon:  '✅',
+      cls:   'valid',
       title: 'Card Verified!',
-      msg: 'This gift card is valid and ready to use. Enjoy!',
+      msg:   'Your gift card is valid and ready to use. Enjoy!',
     },
     used: {
-      icon: '⚠️', cls: 'used',
+      icon:  '⚠️',
+      cls:   'used',
       title: 'Already Used',
-      msg: 'This card has already been redeemed. If you believe this is an error, please contact support.',
+      msg:   'This card has already been redeemed. If you believe this is an error, please contact support.',
     },
     invalid: {
-      icon: '❌', cls: 'invalid',
+      icon:  '❌',
+      cls:   'invalid',
       title: 'Invalid Code',
-      msg: "We couldn't find this card code in the system. Please double-check and try again.",
+      msg:   'We couldn\'t find this card code in our system. Please double-check and try again.',
     },
     error: {
-      icon: '⚡', cls: 'invalid',
+      icon:  '⚡',
+      cls:   'invalid',
       title: 'Connection Error',
-      msg: errMsg || 'Something went wrong. Please check your connection and try again.',
+      msg:   errMsg || 'Something went wrong. Please check your connection and try again.',
     },
   };
+
   const c = configs[status] || configs.invalid;
 
-  $('resultContent').innerHTML =
-    '<div class="result-icon ' + c.cls + '">' + c.icon + '</div>' +
-    '<h2 class="result-title ' + c.cls + '">' + c.title + '</h2>' +
-    '<div class="result-code">' + escHtml(code) + '</div>' +
-    '<p class="result-msg">' + escHtml(c.msg) + '</p>' +
-    '<button class="btn-validate" id="againBtn" type="button" style="margin-top:24px">Validate Another Card</button>';
-  $('againBtn').addEventListener('click', () => render());
+  resultContent.innerHTML = `
+    <div class="result-icon ${c.cls}">${c.icon}</div>
+    <h2 class="result-title ${c.cls}">${c.title}</h2>
+    <div class="result-code">${escHtml(code)}</div>
+    <p class="result-msg">${c.msg}</p>
+  `;
 }
 
-// ── Boot ─────────────────────────────────────────────────────────
-window.addEventListener('hashchange', render);
-document.addEventListener('DOMContentLoaded', render);
+function resetForm() {
+  stepResult.classList.add('hidden');
+  stepLoading.classList.add('hidden');
+  stepUpload.classList.remove('hidden');
+  clearFile();
+  codeInput.value = '';
+  ls.filter(Boolean).forEach(el => el.classList.remove('active','done'));
+}
+
+function shakeInput() {
+  const wrap = codeInput.closest('.code-input-wrap');
+  if (!wrap) return;
+  wrap.style.animation = 'none';
+  wrap.offsetHeight; // reflow
+  wrap.style.animation = 'shake 0.4s ease';
+  setTimeout(() => wrap.style.animation = '', 400);
+}
