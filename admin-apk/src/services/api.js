@@ -4,7 +4,7 @@
 // Auth: Firebase ID token as Bearer. The Firebase SDK persists the session
 // itself (see ./firebase.js) — there is no custom token storage here.
 // Errors: the API returns { error: "message" } with a non-2xx status.
-import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth';
 import { auth, ready } from './firebase';
 
 const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || '').replace(/\/+$/, '');
@@ -59,6 +59,15 @@ async function request(path, opts = {}) {
 export async function signin(email, password) {
   await ready;
   await signInWithEmailAndPassword(auth, email.trim(), password);
+  return syncUser();
+}
+
+export async function signup(email, password, name) {
+  await ready;
+  const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+  if (name && cred.user) {
+    try { await updateProfile(cred.user, { displayName: name.trim() }); } catch (e) { /* non-fatal */ }
+  }
   return syncUser();
 }
 
