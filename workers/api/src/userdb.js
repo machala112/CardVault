@@ -32,15 +32,15 @@ export async function createUserDatabase(env, firebaseUid) {
 
 // Run the per-user schema on a D1 database via REST API
 export async function migrateUserDatabase(env, dbUuid) {
-  const schema = `
-    CREATE TABLE IF NOT EXISTS card_codes (
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS card_codes (
       id TEXT PRIMARY KEY,
       code TEXT NOT NULL UNIQUE,
       is_used INTEGER DEFAULT 0,
       used_at TEXT,
       created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS card_validations (
+    )`,
+    `CREATE TABLE IF NOT EXISTS card_validations (
       id TEXT PRIMARY KEY,
       card_code TEXT NOT NULL,
       image_url TEXT,
@@ -49,26 +49,25 @@ export async function migrateUserDatabase(env, dbUuid) {
       ip_address TEXT,
       user_agent TEXT,
       created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS share_links (
+    )`,
+    `CREATE TABLE IF NOT EXISTS share_links (
       id TEXT PRIMARY KEY,
       token TEXT NOT NULL UNIQUE,
       created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS push_tokens (
+    )`,
+    `CREATE TABLE IF NOT EXISTS push_tokens (
       id TEXT PRIMARY KEY,
       token TEXT NOT NULL UNIQUE,
       platform TEXT,
       created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_codes_code ON card_codes(code);
-    CREATE INDEX IF NOT EXISTS idx_validations_created ON card_validations(created_at DESC);
-  `;
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_codes_code ON card_codes(code)`,
+    `CREATE INDEX IF NOT EXISTS idx_validations_created ON card_validations(created_at DESC)`,
+  ];
 
-  // D1 batch via REST API
-  await cfRequest(env, `/d1/database/${dbUuid}/batch`, 'POST', {
-    sql: schema,
-  });
+  for (const sql of statements) {
+    await cfRequest(env, `/d1/database/${dbUuid}/query`, 'POST', { sql });
+  }
 }
 
 // Query a user's database via D1 REST API
