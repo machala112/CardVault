@@ -44,7 +44,7 @@ jobs:
       - name: Write API config
         working-directory: admin-apk
         run: |
-          echo "EXPO_PUBLIC_API_URL=${{ secrets.API_URL }}" >> .env
+          echo "EXPO_PUBLIC_API_URL=${{ secrets.APP_BACKEND_URL }}" >> .env
 
       - name: Build APK with Gradle
         working-directory: admin-apk/android
