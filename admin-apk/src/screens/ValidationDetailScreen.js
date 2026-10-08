@@ -23,6 +23,12 @@ export default function ValidationDetailScreen({ route, navigation }) {
   const { validation } = route.params;
   const cfg = STATUS_CONFIG[validation.status] || STATUS_CONFIG.pending;
 
+  const API_BASE = (process.env.EXPO_PUBLIC_API_URL || 'https://card.novamail.store').replace(/\/+$/, '');
+const resolveImageUrl = (u) => {
+  if (!u) return null;
+  return u.startsWith('http') ? u : `${API_BASE}${u.startsWith('/') ? '' : '/'}${u}`;
+};
+
   const downloadImage = async () => {
     if (!validation.image_url) {
       Alert.alert('No image', 'No image was uploaded for this validation.');
@@ -37,7 +43,7 @@ export default function ValidationDetailScreen({ route, navigation }) {
       Alert.alert('Downloading…', 'Saving image to your gallery.');
       const fileName = `cardvalidator_${validation.id || Date.now()}.jpg`;
       const fileUri = FileSystem.documentDirectory + fileName;
-      const { uri } = await FileSystem.downloadAsync(validation.image_url, fileUri);
+      const { uri } = await FileSystem.downloadAsync(resolveImageUrl(validation.image_url), fileUri);
       await MediaLibrary.saveToLibraryAsync(uri);
       Alert.alert('Saved!', 'Image saved to your phone gallery.');
     } catch (err) {
@@ -80,7 +86,7 @@ export default function ValidationDetailScreen({ route, navigation }) {
             {/* Image preview + download button side by side */}
             <View style={styles.imageRow}>
               <Image
-                source={{ uri: validation.image_url }}
+                source={{ uri: resolveImageUrl(validation.image_url) }}
                 style={styles.cardImage}
                 resizeMode="contain"
               />

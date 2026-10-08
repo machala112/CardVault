@@ -61,6 +61,11 @@ export async function migrateUserDatabase(env, dbUuid) {
       platform TEXT,
       created_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS images (
+      id TEXT PRIMARY KEY,
+      data_url TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_codes_code ON card_codes(code)`,
     `CREATE INDEX IF NOT EXISTS idx_validations_created ON card_validations(created_at DESC)`,
   ];

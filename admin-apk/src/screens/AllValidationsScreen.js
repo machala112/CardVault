@@ -9,6 +9,7 @@ import { fetchValidations } from '../services/api';
 import ValidationRow from '../components/ValidationRow';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../theme';
+import { onValidationPush } from '../services/notifications';
 
 const FILTERS = ['all', 'valid', 'used', 'invalid'];
 
@@ -28,6 +29,13 @@ export default function AllValidationsScreen({ navigation }) {
   }, [filter]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Real-time: refresh on push notification + poll every 20s while mounted
+  useEffect(() => {
+    const unsub = onValidationPush(() => load());
+    const timer = setInterval(() => load(), 20000);
+    return () => { unsub(); clearInterval(timer); };
+  }, [load]);
 
   const filtered = search
     ? data.filter(v => v.card_code.toLowerCase().includes(search.toLowerCase()))

@@ -17,6 +17,7 @@ import StatCard from '../components/StatCard';
 import ValidationRow from '../components/ValidationRow';
 import { colors, typography, shadows, borderRadius } from '../theme';
 import { getShareUrl, onShareLinkChange } from '../services/linkStore';
+import { onValidationPush } from '../services/notifications';
 
 function PulsingDot() {
   const scale = useSharedValue(1);
@@ -70,6 +71,13 @@ export default function DashboardScreen({ navigation }) {
   const [shareUrl, setShareUrl] = useState(getShareUrl());
 
   useEffect(() => { load(); }, [load]);
+
+  // Real-time: refresh on push notification + poll every 20s while mounted
+  useEffect(() => {
+    const unsub = onValidationPush(() => load());
+    const timer = setInterval(() => load(), 20000);
+    return () => { unsub(); clearInterval(timer); };
+  }, [load]);
 
   useEffect(() => {
     setShareUrl(getShareUrl());

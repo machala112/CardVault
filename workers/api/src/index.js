@@ -146,7 +146,6 @@ async function handleResolveLink(request, env) {
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 async function handleUpload(request, env) {
-  if (!env.IMAGES) return err('Image uploads are not enabled (R2 not configured)', 503);
   let form;
   try { form = await request.formData(); }
   catch { return err('Expected a multipart form upload'); }
@@ -159,12 +158,37 @@ async function handleUpload(request, env) {
   if (!file.type.startsWith('image/')) return err('Only image files are allowed');
   if (file.size > MAX_IMAGE_BYTES) return err('Image must be under 8 MB');
 
-  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'jpg';
-  const key = `uploads/${newId()}.${ext}`;
-  await env.IMAGES.put(key, file.stream(), {
-    httpMetadata: { contentType: file.type },
-  });
-  return json({ image_url: `/img/${key}` });
+  const dbId = link.d1_database_id;
+  const imgId = newId();
+  const contentType = file.type.split(';')[0] || 'image/jpeg';
+
+  if (env.IMAGES) {
+    // R2 path (preferred when configured)
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'jpg';
+    const key = `uploads/${imgId}.${ext}`;
+    await env.IMAGES.put(key, file.stream(), {
+      httpMetadata: { contentType },
+    });
+    return json({ image_url: `/img/${key}` });
+  }
+
+  // D1 fallback: store as base64 data URL (R2 not configured).
+  // Ensure the images table exists (covers pre-existing user DBs).
+  await execUserDb(env, dbId,
+    `CREATE TABLE IF NOT EXISTS images (
+       id TEXT PRIMARY KEY, data_url TEXT NOT NULL, created_at TEXT NOT NULL
+     )`);
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let bin = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK));
+  }
+  const dataUrl = `data:${contentType};base64,${btoa(bin)}`;
+  await execUserDb(env, dbId,
+    'INSERT INTO images (id, data_url, created_at) VALUES (?, ?, ?)',
+    [imgId, dataUrl, nowIso()]);
+  return json({ image_url: `/img/${imgId}` });
 }
 
 async function handleValidate(request, env, ctx) {
@@ -199,23 +223,62 @@ async function handleValidate(request, env, ctx) {
     [newId(), clean, image_url, status, link.id, ip, agent, nowIso()]);
 
   // Instant push to the link OWNER's devices only — never blocks the response.
-  ctx.waitUntil(sendValidationPush(env, link.d1_database_id, {
-    title: status === 'valid' ? '✅ Card validated'
-         : status === 'used'   ? '⚠️ Card already used'
-         :                       '❌ Invalid card code',
-    body: `Code ${clean} via ${link.owner_name || 'a shared link'}`,
-  }));
+  // Deduplicate: skip the push if the same code was validated in the last 90s
+  // (prevents notification spam from double-taps/retries).
+  ctx.waitUntil((async () => {
+    try {
+      const recent = await queryUserDbFirst(env, dbId,
+        `SELECT COUNT(*) AS n FROM card_validations
+         WHERE card_code = ? AND julianday(created_at) > julianday('now', '-90 seconds')`, [clean]);
+      if ((recent?.n || 0) > 1) return; // this row + at least one earlier = duplicate
+    } catch (e) { /* fall through and send */ }
+    await sendValidationPush(env, link.d1_database_id, {
+      title: status === 'valid' ? '✅ Card validated'
+           : status === 'used'   ? '⚠️ Card already used'
+           :                       '❌ Invalid card code',
+      body: `Code ${clean} via ${link.owner_name || 'a shared link'}`,
+    });
+  })());
 
   return json({ status, code: clean });
 }
 
 async function handleImage(request, env, key) {
-  if (!env.IMAGES) return err('Not found', 404);
-  const obj = await env.IMAGES.get(key);
-  if (!obj) return err('Not found', 404);
-  const headers = { ...CORS, 'Cache-Control': 'public, max-age=31536000' };
-  if (obj.httpMetadata?.contentType) headers['content-type'] = obj.httpMetadata.contentType;
-  return new Response(obj.body, { headers });
+  // R2 path
+  if (env.IMAGES) {
+    const obj = await env.IMAGES.get(key);
+    if (obj) {
+      const headers = { ...CORS, 'Cache-Control': 'public, max-age=31536000' };
+      if (obj.httpMetadata?.contentType) headers['content-type'] = obj.httpMetadata.contentType;
+      return new Response(obj.body, { headers });
+    }
+  }
+  // D1 fallback: key may be a bare image id (no slashes) stored per-user.
+  // We don't know the owner from the key alone, so scan user DBs (few users).
+  if (key && !key.includes('/')) {
+    try {
+      const users = await env.DB.prepare(
+        'SELECT d1_database_id FROM users WHERE d1_database_id IS NOT NULL'
+      ).all();
+      for (const u of (users.results || [])) {
+        try {
+          const row = await queryUserDbFirst(env, u.d1_database_id,
+            'SELECT data_url FROM images WHERE id = ?', [key]);
+          if (row?.data_url) {
+            const m = row.data_url.match(/^data:([^;]+);base64,(.+)$/);
+            if (!m) return err('Not found', 404);
+            const bin = atob(m[2]);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            return new Response(bytes, {
+              headers: { ...CORS, 'content-type': m[1], 'Cache-Control': 'public, max-age=31536000' },
+            });
+          }
+        } catch (e) { /* try next */ }
+      }
+    } catch (e) { /* fall through */ }
+  }
+  return err('Not found', 404);
 }
 
 // ── admin ──────────────────────────────────────────────────────
@@ -303,11 +366,26 @@ async function handleAdminPushToken(request, env) {
   if (!dbId) return err('Database not provisioned', 500);
   const { token = '', platform = '' } = await readBody(request);
   if (!token) return err('Missing device token');
+  const cleanToken = token.trim();
   await execUserDb(env, dbId,
     `INSERT INTO push_tokens (id, token, platform, created_at)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(token) DO UPDATE SET platform = excluded.platform`,
-    [newId(), token.trim(), platform.slice(0, 20) || null, nowIso()]);
+    [newId(), cleanToken, platform.slice(0, 20) || null, nowIso()]);
+  // CRITICAL: A device token belongs to exactly one user. If this device
+  // was previously logged into a different account, its token is still in
+  // that account's database — remove it so notifications never leak across users.
+  try {
+    const others = await env.DB.prepare(
+      'SELECT d1_database_id FROM users WHERE id != ? AND d1_database_id IS NOT NULL'
+    ).bind(user.id).all();
+    for (const o of (others.results || [])) {
+      try {
+        await execUserDb(env, o.d1_database_id,
+          'DELETE FROM push_tokens WHERE token = ?', [cleanToken]);
+      } catch (e) { /* best-effort cleanup */ }
+    }
+  } catch (e) { /* best-effort cleanup */ }
   return json({ ok: true });
 }
 

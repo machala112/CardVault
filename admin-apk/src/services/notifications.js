@@ -84,6 +84,18 @@ export async function registerForPushNotifications() {
   }
 }
 
+// ── Data refresh bus: screens subscribe to re-fetch on new validation ──
+const refreshListeners = new Set();
+export function onValidationPush(cb) {
+  refreshListeners.add(cb);
+  return () => refreshListeners.delete(cb);
+}
+function emitValidationPush() {
+  for (const cb of refreshListeners) {
+    try { cb(); } catch (e) { /* ignore */ }
+  }
+}
+
 // ── Foreground push listener: present as a local notification ─────
 export function addPushListener() {
   return Notifications.addNotificationReceivedListener(async (notification) => {
@@ -99,6 +111,7 @@ export function addPushListener() {
       !status; // no status in payload → show it if notifications are on
 
     if (!allowed) return;
+    emitValidationPush();
 
     const statusLabels = { valid: '✅ Valid', used: '⚠️ Used', invalid: '❌ Invalid' };
     await Notifications.scheduleNotificationAsync({
